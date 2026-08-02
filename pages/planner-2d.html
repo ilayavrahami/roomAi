@@ -320,7 +320,7 @@ function doorGeometry(door, room){
   return { gapStart, gapEnd, hinge, closedPoint, openPoint, sweep };
 }
 
-/* ============ AI generation (via Netlify function → OpenRouter/DeepSeek) ============ */
+/* ============ AI generation (via Vercel function → OpenRouter) ============ */
 document.getElementById('generateBtn').addEventListener('click', async () => {
   const room = collect();
   if(room.doors.length === 0){ showError('נא להוסיף לפחות דלת אחת.'); return; }
@@ -330,11 +330,12 @@ document.getElementById('generateBtn').addEventListener('click', async () => {
   document.getElementById('statusBox').style.display = 'flex';
   document.getElementById('generateBtn').disabled = true;
 
-  // The system prompt and the OpenRouter/DeepSeek call itself now live
-  // server-side in netlify/functions/generate-plan.js — the API key never
-  // reaches the browser. We just send the room data and get furniture back.
+  // The system prompt and the OpenRouter call itself now live server-side
+  // in api/generate-plan.js (Vercel Serverless Function) — the API key
+  // never reaches the browser. We just send the room data and get
+  // furniture back.
   try{
-    const response = await fetch("/.netlify/functions/generate-plan", {
+    const response = await fetch("/api/generate-plan", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ room })
@@ -349,7 +350,7 @@ document.getElementById('generateBtn').addEventListener('click', async () => {
       console.error('generate-plan: non-JSON response', response.status, text.slice(0, 300));
       throw new Error(
         response.status === 404
-          ? 'פונקציית השרת לא נמצאה (404). ודאו שהאתר פרוס ב-Netlify וש-netlify/functions/generate-plan.js קיים בפרסום.'
+          ? 'פונקציית השרת לא נמצאה (404). ודאו שהאתר פרוס ב-Vercel וש-api/generate-plan.js קיים בפריסה (Deployments → Functions).'
           : `השרת החזיר תגובה לא צפויה (סטטוס ${response.status}).`
       );
     }
