@@ -194,6 +194,67 @@ const JSON_HEADERS_HELPER = (res) => {
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
 };
 
+// Hard cap per model call — without this, a hung free-tier endpoint can
+// block the whole function until the PLATFORM kills it (which is exactly
+// what "Status: 0 / Waiting for response" forever means: no response was
+// ever sent back to Vercel, so it never even got to log a status code).
+const PER_CALL_TIMEOUT_MS = 15000;
+
+async function attemptModel(model, apiKey, userPrompt) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), PER_CALL_TIMEOUT_MS);
+
+  try {
+    const orResponse = await fetch(OPENROUTER_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+        'HTTP-Referer': 'https://roomai.example.com',
+        'X-Title': 'RoomAI',
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: 0.6,
+        max_tokens: 4000,
+      }),
+      signal: controller.signal,
+    });
+
+    if (!orResponse.ok) {
+      const errText = await orResponse.text().catch(() => '');
+      return { model, ok: false, reason: `http_${orResponse.status}`, detail: errText.slice(0, 300) };
+    }
+
+    let data;
+    try {
+      data = await orResponse.json();
+    } catch (parseErr) {
+      return { model, ok: false, reason: 'bad_json_from_provider' };
+    }
+
+    const rawText = data?.choices?.[0]?.message?.content || '';
+    if (data?.choices?.[0]?.finish_reason === 'length') {
+      console.warn(`generate-plan: ${model} completion was truncated (hit max_tokens)`);
+    }
+
+    const furniture = extractFurniture(rawText);
+    const report = extractReport(rawText);
+    const hasUsableReport = !!(report && report.length > 30);
+
+    return { model, ok: true, rawText, furniture, hasFurniture: !!furniture, report: hasUsableReport ? report : null, hasUsableReport };
+  } catch (err) {
+    const timedOut = err.name === 'AbortError';
+    return { model, ok: false, reason: timedOut ? 'timeout' : 'network_error', detail: String(err) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 module.exports = async function handler(req, res) {
   JSON_HEADERS_HELPER(res);
 
@@ -223,103 +284,52 @@ module.exports = async function handler(req, res) {
 
     const userPrompt = buildUserPrompt(room);
 
-    const callModel = (model) =>
-      fetch(OPENROUTER_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-          'HTTP-Referer': 'https://roomai.example.com',
-          'X-Title': 'RoomAI',
-        },
-        body: JSON.stringify({
-          model,
-          messages: [
-            { role: 'system', content: SYSTEM_PROMPT },
-            { role: 'user', content: userPrompt },
-          ],
-          temperature: 0.6,
-          // The write-up (sections 1-6) plus the JSON section needs real
-          // room — 1500 tokens was cutting the response off before the
-          // JSON block ever appeared, which is one cause of failures.
-          max_tokens: 4000,
-        }),
-      });
+    // Fire all candidates IN PARALLEL (bounded by PER_CALL_TIMEOUT_MS each)
+    // instead of one after another — sequential retries is what caused the
+    // request to hang past Vercel's function time limit.
+    const settled = await Promise.allSettled(
+      MODEL_CANDIDATES.map((model) => attemptModel(model, apiKey, userPrompt))
+    );
+    const results = settled.map((s) =>
+      s.status === 'fulfilled' ? s.value : { ok: false, reason: 'unexpected_rejection', detail: String(s.reason) }
+    );
 
-    let bestAttempt = null; // { model, rawText, report, furniture }
-    let lastHttpError = null;
-
-    for (const model of MODEL_CANDIDATES) {
-      let orResponse;
-      try {
-        orResponse = await callModel(model);
-      } catch (networkErr) {
-        console.warn(`generate-plan: network error calling ${model}`, networkErr);
-        lastHttpError = 'network';
-        continue;
-      }
-
-      if (!orResponse.ok) {
-        const errText = await orResponse.text().catch(() => '');
-        console.warn(`generate-plan: ${model} returned ${orResponse.status}`, errText.slice(0, 300));
-        lastHttpError = orResponse.status;
-        continue; // try the next candidate
-      }
-
-      let data;
-      try {
-        data = await orResponse.json();
-      } catch (parseErr) {
-        console.warn(`generate-plan: ${model} response was not JSON`, parseErr);
-        continue;
-      }
-
-      const rawText = data?.choices?.[0]?.message?.content || '';
-      const finishReason = data?.choices?.[0]?.finish_reason;
-      if (finishReason === 'length') {
-        console.warn(`generate-plan: ${model} completion was truncated (hit max_tokens)`);
-      }
-
-      const furniture = extractFurniture(rawText);
-      const report = extractReport(rawText);
-      const hasUsableReport = report && report.length > 30;
-
-      // Keep the most useful attempt so far, in case every candidate
-      // ends up partial and we need to fall back to the best of a bad lot.
-      if (!bestAttempt || (furniture && !bestAttempt.furniture) || (hasUsableReport && !bestAttempt.report)) {
-        bestAttempt = { model, rawText, report: hasUsableReport ? report : bestAttempt?.report, furniture: furniture || bestAttempt?.furniture };
-      }
-
-      if (furniture && hasUsableReport) {
-        // Full success — no need to try further candidates.
-        res.status(200).json({ report, furniture });
-        return;
-      }
+    // Prefer results in MODEL_CANDIDATES order (not arrival order) so
+    // behavior stays predictable regardless of which one answers first.
+    const full = results.find((r) => r.ok && r.hasFurniture && r.hasUsableReport);
+    if (full) {
+      res.status(200).json({ report: full.report, furniture: full.furniture });
+      return;
     }
 
-    // Every candidate was partial or failed outright.
-    if (bestAttempt && (bestAttempt.furniture || bestAttempt.report)) {
-      console.warn(`generate-plan: falling back to partial result from ${bestAttempt.model}`);
+    const partial = results.find((r) => r.ok && (r.hasFurniture || r.hasUsableReport));
+    if (partial) {
+      console.warn(`generate-plan: falling back to partial result from ${partial.model}`);
       res.status(200).json({
-        report: bestAttempt.report || null,
-        furniture: bestAttempt.furniture || [],
-        warning: bestAttempt.furniture
+        report: partial.report || null,
+        furniture: partial.furniture || [],
+        warning: partial.hasFurniture
           ? 'המודל לא סיפק תיאור מלא, אך הפריסה הדו-ממדית נוצרה בהצלחה.'
-          : 'המודל סיפק תיאור אך לא הצליח ליצור תוכנית JSON תקינה לפריסת הרהיטים. נסו שוב — לפעמים ניסיון חוזר עובר על מודל שונה.',
-        // Surface the raw text too so you're not left guessing what the
-        // model actually said — this is exactly what "no report at all"
-        // looked like from the outside; now you can see why.
-        debugRaw: bestAttempt.report ? undefined : bestAttempt.rawText.slice(0, 2000),
+          : 'המודל סיפק תיאור אך לא הצליח ליצור תוכנית JSON תקינה לפריסת הרהיטים. נסו שוב.',
+        debugRaw: partial.report ? undefined : (partial.rawText || '').slice(0, 2000),
       });
       return;
     }
 
-    console.error('generate-plan: all model candidates failed', { lastHttpError });
+    console.error('generate-plan: all model candidates failed', results.map((r) => ({ model: r.model, reason: r.reason })));
+    const anyTimeout = results.some((r) => r.reason === 'timeout');
     res.status(502).json({
-      error: 'כל המודלים החינמיים הזמינים כרגע נכשלו במענה לבקשה. נסו שוב בעוד רגע (יתכן עומס זמני על השכבה החינמית של OpenRouter).',
+      error: anyTimeout
+        ? 'המודלים החינמיים לא הגיבו בזמן. נסו שוב בעוד רגע — לפעמים זה עומס זמני על שכבת החינם של OpenRouter.'
+        : 'כל המודלים החינמיים הזמינים כרגע נכשלו במענה לבקשה. נסו שוב בעוד רגע.',
     });
   } catch (err) {
     console.error('generate-plan: unexpected error', err);
     res.status(500).json({ error: 'שגיאה לא צפויה בשרת. נסו שוב.' });
   }
 };
+
+// Ask Vercel for more than the ~10s default so a slow-but-successful free
+// model still gets to finish. Hobby plan supports up to 60s; we ask for
+// 30s, comfortably above our 15s per-call timeout plus overhead.
+module.exports.config = { maxDuration: 30 };
