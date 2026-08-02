@@ -1,84 +1,87 @@
 // api/generate-plan.js  (Vercel Serverless Function)
 //
-// Server-side proxy: receives room data from the browser, calls OpenRouter
-// (a free auto-routed model) with a rich interior-design prompt, and
-// returns both a human-readable design write-up ("report") and a clean
-// furniture-layout JSON array ("furniture") extracted from it.
+// Server-side proxy: receives room data from the browser and calls
+// OpenRouter (free models) to generate a room layout.
+//
+// ARCHITECTURE NOTE (rewritten after repeated timeouts):
+// Earlier versions asked ONE model call to produce both a long Hebrew
+// design write-up AND the furniture JSON in a single ~4000-token
+// completion. Free-tier OpenRouter models are slow and unpredictable —
+// OpenRouter's own docs recommend 120s+ client timeouts for them — so a
+// single big request kept getting killed by our own timeout before
+// finishing, which looked like "everything failed" even though nothing
+// was actually broken.
+//
+// Fix: split into two SMALLER, INDEPENDENT requests:
+//   1. "layout" — ONLY the furniture JSON (~900 tokens). This is the
+//      thing you actually asked for (the 2D drawing data), so it's
+//      requested first, with strict JSON mode, and is fast because it's
+//      a small ask.
+//   2. "report" — ONLY the descriptive write-up (~1800 tokens), no JSON
+//      involved. Best-effort: if this fails, you still get your 2D plan.
+// Both run in parallel across a few free-model candidates each, with
+// generous (but bounded) per-call timeouts, so one slow/dead model can't
+// sink the whole request — and the critical layout no longer has to
+// compete with the write-up for time or token budget.
 //
 // The OpenRouter API key lives ONLY in the Vercel environment variable
 // OPENROUTER_API_KEY — it is never sent to, or visible from, the browser.
 //
-// IMPORTANT: every code path below sends a proper JSON response via
-// res.status(...).json(...). The whole handler is wrapped in one outer
-// try/catch so an unexpected error can never bubble up as a raw error
-// page — the browser should always get valid JSON to parse.
+// Every code path sends a proper JSON response via res.status().json().
+// The whole handler is wrapped in one outer try/catch so an unexpected
+// error can never bubble up as a raw error page.
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
-// A ranked list of specific free, non-OpenAI models to try, instead of
-// relying on OpenRouter's random "openrouter/free" auto-router — that
-// router can land on a weak free model that ignores complex multi-section
-// instructions entirely, which is what produced the empty/unparseable
-// response. We try each candidate in order and stop at the first one
-// that returns text we can actually extract a report + JSON from.
-// Verified live on openrouter.ai/models (Price: Free) as of Aug 2, 2026.
-// NOTE: free model IDs on OpenRouter churn every few weeks — if these
-// start returning 404, check https://openrouter.ai/models?max_price=0
-// and update this list (check server logs for the per-model reason).
+// Free, non-OpenAI models — verified live on openrouter.ai/models
+// (Price: Free) as of Aug 2, 2026. Free model IDs on OpenRouter churn
+// every few weeks; if these start returning http_404 in the logs, check
+// https://openrouter.ai/models?max_price=0 and update this list.
 const MODEL_CANDIDATES = [
-  'google/gemma-4-31b-it:free',             // highest-quality free model currently listed
-  'nvidia/nemotron-3-super-120b-a12b:free', // tuned for structured/tool output
-  'inclusionai/ling-3.0-flash:free',        // fast, decent instruction-following
-  'openrouter/free',                        // last resort: whatever's currently free
+  'google/gemma-4-31b-it:free',
+  'nvidia/nemotron-3-super-120b-a12b:free',
+  'inclusionai/ling-3.0-flash:free',
 ];
 
-// The response now mixes a long-form Hebrew design write-up with a JSON
-// payload at the end, so we no longer force response_format: json_object
-// (that mode requires the ENTIRE completion to be JSON, which would be
-// incompatible with the prose sections). Instead we ask the model to wrap
-// the JSON in its own fenced code block, which we extract reliably below
-// regardless of everything else the model writes around it.
-const SYSTEM_PROMPT = `You are RoomAI, a professional interior architect and space planning AI.
-Your task is to design the user's room based ONLY on the information the user provides.
-Do not invent missing measurements. If important information is missing, clearly state your assumptions before designing.
+// Free-tier inference is genuinely slow, especially for the bigger
+// models. OpenRouter's own guidance is 120s+ client timeouts. We give
+// the CRITICAL layout call more time than the report call, since it's
+// small (~900 tokens) and worth waiting for; the report is best-effort.
+const LAYOUT_TIMEOUT_MS = 60000;
+const REPORT_TIMEOUT_MS = 90000;
 
-Your goals:
-- Maximize comfort and ergonomics.
-- Keep all walkways clear (at least 60cm).
+const LAYOUT_SYSTEM_PROMPT = `You are RoomAI, a professional interior architect and space-planning AI.
+Design furniture placement for the user's room based ONLY on the information given. Do not invent missing measurements.
+
+Rules:
+- Maximize comfort and ergonomics. Keep all walkways clear (at least 60cm).
 - Respect door and window locations; keep a 90cm clearance in front of every door's swing.
-- Do not block doors, windows, or the air conditioner.
-- Stay within the user's budget.
-- Match the requested design style.
+- Do not block doors, windows, or the air conditioner. No overlapping items.
+- Stay within budget and match the requested style.
+- Coordinate system: (0,0) is the north-west corner of the room. X grows east, Y grows south. All values in centimeters.
 
-Write your entire response in Hebrew (except the JSON keys and the English image-generation prompt in section 6), using EXACTLY this structure, with each section starting on its own line with a "#" heading:
+Respond with ONLY a single JSON object, nothing else — no explanation, no markdown fences:
+{"furniture": [{"id":"item_1","type":"bed|sofa|desk|wardrobe|table|chair|shelf|nightstand|dresser|rug|other","name":"short Hebrew name","x":number,"y":number,"width":number,"length":number,"rotation":0|90|180|270}]}
+Return between 4 and 10 items appropriate for the room type, style and budget.`;
+
+const REPORT_SYSTEM_PROMPT = `You are RoomAI, a professional interior architect writing a short client-facing design summary in Hebrew, based ONLY on the information given. Do not invent missing measurements.
+
+Write your entire response in Hebrew (except the JSON... there is no JSON here — and except the English image prompt in section 5), using EXACTLY this structure, each section starting on its own line with a "#" heading. Keep it concise — this is a summary, not an essay:
 
 # 1. חדר שתכננתי עבורך
-250–500 words describing the room as if the user just walked into it: the feeling of the room, furniture placement and why, how people move inside it, colors, materials, lighting, storage, decorative elements. Do not mention coordinates or JSON here.
+120–200 words describing the room as if the user just walked into it: the feeling, furniture placement and why, colors, materials, lighting. Do not mention coordinates or JSON.
 
-# 2. הסבר הפריסה
-Explain in plain language where every furniture item is located and why.
+# 2. רשימת קניות
+3-5 concrete furniture/product types fitting the room, style and budget. If you cannot verify a real, currently-sold product, describe the type and approximate price range instead of inventing a brand.
 
-# 3. רשימת קניות
-Suggest concrete furniture/product types that fit the room, style and budget. If you cannot verify a real, currently-sold product, describe the type of item and its approximate price range instead of inventing a specific product name or brand.
+# 3. פלטת צבעים
+4–6 colors with HEX codes and a short Hebrew label each (e.g. "#E8DCC8 – בז' חמים").
 
-# 4. פלטת צבעים
-List 4–6 colors with their HEX codes and a short Hebrew label for each (e.g. "#E8DCC8 – בז' חמים").
+# 4. תוכנית תאורה
+2-3 sentences on lighting placement and type (ambient, task, accent).
 
-# 5. תוכנית תאורה
-Explain lighting placement and type (ambient, task, accent).
-
-# 6. AI Image Prompt
-A single English paragraph, suitable as a prompt for an image-generation model, describing what the finished room should look like.
-
-# 7. JSON
-Return ONLY a fenced code block, opened with \`\`\`json and closed with \`\`\`, containing a single JSON object and nothing else inside the fences:
-{"furniture": [ ... ]}
-
-Rules for the furniture array:
-- Coordinate system: (0,0) is the north-west corner of the room. X grows east, Y grows south. All values in centimeters.
-- Every item: {"id":"item_1","type":"bed|sofa|desk|wardrobe|table|chair|shelf|nightstand|dresser|rug|other","name":"short Hebrew name","x":number,"y":number,"width":number,"length":number,"rotation":0|90|180|270}
-- Return between 4 and 10 items appropriate for the room type, style and budget.
-- No overlapping items, no blocking windows with tall furniture.`;
+# 5. AI Image Prompt
+A single English paragraph, suitable as a prompt for an image-generation model, describing what the finished room should look like.`;
 
 function formatDoors(doors) {
   const WALL_HE = { north: 'צפוני', south: 'דרומי', east: 'מזרחי', west: 'מערבי' };
@@ -138,13 +141,11 @@ ${room.notes || room.acLocation || room.outlets ? `AC: ${room.acLocation || 'ל�
 ========================`;
 }
 
-// Extracts the furniture array from the model's raw completion text.
-// Looks first for a fenced \`\`\`json block (what we asked for) — takes the
-// LAST one found, in case the model echoes an example earlier. Falls back
-// to a bare {...} / [...] scan for models that don't follow fencing.
+// Extracts the furniture array from a completion. Handles: a clean JSON
+// object (expected, since the layout call uses response_format), a
+// fenced ```json block, or a bare {...}/[...] blob as last resort.
 function extractFurniture(rawText) {
-  const text = String(rawText || '');
-  const fenced = [...text.matchAll(/```json\s*([\s\S]*?)```/gi)];
+  const text = String(rawText || '').trim();
 
   const tryParse = (str) => {
     try {
@@ -157,14 +158,16 @@ function extractFurniture(rawText) {
     return null;
   };
 
+  // Most likely case: the whole response IS the JSON object.
+  const direct = tryParse(text);
+  if (direct) return direct;
+
+  const fenced = [...text.matchAll(/```json\s*([\s\S]*?)```/gi)];
   if (fenced.length) {
-    const last = fenced[fenced.length - 1][1];
-    const result = tryParse(last);
+    const result = tryParse(fenced[fenced.length - 1][1]);
     if (result) return result;
   }
 
-  // Fallback: last {...} blob anywhere in the text.
-  const objMatches = [...text.matchAll(/\{[\s\S]*?\}\s*$/gm)];
   const braceBlobs = [...text.matchAll(/\{[\s\S]*\}/g)];
   if (braceBlobs.length) {
     const result = tryParse(braceBlobs[braceBlobs.length - 1][0]);
@@ -180,36 +183,26 @@ function extractFurniture(rawText) {
   return null;
 }
 
-// Strips the "# 7. JSON" section (and its fenced code block) out of the
-// raw text, leaving sections 1-6 as clean Hebrew markdown for display.
-function extractReport(rawText) {
-  const text = String(rawText || '');
-  const cutIndex = text.search(/^#\s*7\b/m);
-  const withoutJsonSection = cutIndex === -1 ? text : text.slice(0, cutIndex);
-  return withoutJsonSection.trim();
+function isUsableReport(text) {
+  return !!(text && text.trim().length > 30);
 }
 
-const JSON_HEADERS_HELPER = (res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-};
-
-// Hard cap per model call — without this, a hung free-tier endpoint can
-// block the whole function until the PLATFORM kills it (which is exactly
-// what "Status: 0 / Waiting for response" forever means: no response was
-// ever sent back to Vercel, so it never even got to log a status code).
-// 45s (not 15s) because generating a full ~4000-token multi-section
-// response on a free-tier model genuinely takes a while — 15s was
-// aborting every candidate mid-generation, which is what turned into
-// "all model candidates failed" even though nothing was actually broken.
-const PER_CALL_TIMEOUT_MS = 45000;
-
-async function attemptModel(model, apiKey, userPrompt) {
+async function callOpenRouter({ model, apiKey, systemPrompt, userPrompt, maxTokens, timeoutMs, jsonMode }) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), PER_CALL_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
+    const body = {
+      model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      temperature: 0.5,
+      max_tokens: maxTokens,
+    };
+    if (jsonMode) body.response_format = { type: 'json_object' };
+
     const orResponse = await fetch(OPENROUTER_URL, {
       method: 'POST',
       headers: {
@@ -218,15 +211,7 @@ async function attemptModel(model, apiKey, userPrompt) {
         'HTTP-Referer': 'https://roomai.example.com',
         'X-Title': 'RoomAI',
       },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          { role: 'user', content: userPrompt },
-        ],
-        temperature: 0.6,
-        max_tokens: 4000,
-      }),
+      body: JSON.stringify(body),
       signal: controller.signal,
     });
 
@@ -247,11 +232,7 @@ async function attemptModel(model, apiKey, userPrompt) {
       console.warn(`generate-plan: ${model} completion was truncated (hit max_tokens)`);
     }
 
-    const furniture = extractFurniture(rawText);
-    const report = extractReport(rawText);
-    const hasUsableReport = !!(report && report.length > 30);
-
-    return { model, ok: true, rawText, furniture, hasFurniture: !!furniture, report: hasUsableReport ? report : null, hasUsableReport };
+    return { model, ok: true, rawText };
   } catch (err) {
     const timedOut = err.name === 'AbortError';
     return { model, ok: false, reason: timedOut ? 'timeout' : 'network_error', detail: String(err) };
@@ -259,6 +240,25 @@ async function attemptModel(model, apiKey, userPrompt) {
     clearTimeout(timer);
   }
 }
+
+// Runs `attempt` against every candidate in parallel and returns the
+// first successful (ok:true) result in MODEL_CANDIDATES priority order —
+// not arrival order, so behavior stays predictable. Also returns all
+// raw results for logging when everything fails.
+async function raceCandidates(candidates, attempt) {
+  const settled = await Promise.allSettled(candidates.map(attempt));
+  const results = settled.map((s) =>
+    s.status === 'fulfilled' ? s.value : { ok: false, reason: 'unexpected_rejection', detail: String(s.reason) }
+  );
+  const success = results.find((r) => r.ok);
+  return { success, results };
+}
+
+const JSON_HEADERS_HELPER = (res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+};
 
 module.exports = async function handler(req, res) {
   JSON_HEADERS_HELPER(res);
@@ -289,44 +289,75 @@ module.exports = async function handler(req, res) {
 
     const userPrompt = buildUserPrompt(room);
 
-    // Fire all candidates IN PARALLEL (bounded by PER_CALL_TIMEOUT_MS each)
-    // instead of one after another — sequential retries is what caused the
-    // request to hang past Vercel's function time limit.
-    const settled = await Promise.allSettled(
-      MODEL_CANDIDATES.map((model) => attemptModel(model, apiKey, userPrompt))
-    );
-    const results = settled.map((s) =>
-      s.status === 'fulfilled' ? s.value : { ok: false, reason: 'unexpected_rejection', detail: String(s.reason) }
-    );
+    // Layout (critical) and report (best-effort) run fully in parallel —
+    // one being slow or failing never blocks or delays the other.
+    const [layoutOutcome, reportOutcome] = await Promise.all([
+      raceCandidates(MODEL_CANDIDATES, (model) =>
+        callOpenRouter({
+          model, apiKey, userPrompt,
+          systemPrompt: LAYOUT_SYSTEM_PROMPT,
+          maxTokens: 900,
+          timeoutMs: LAYOUT_TIMEOUT_MS,
+          jsonMode: true,
+        })
+      ),
+      raceCandidates(MODEL_CANDIDATES, (model) =>
+        callOpenRouter({
+          model, apiKey, userPrompt,
+          systemPrompt: REPORT_SYSTEM_PROMPT,
+          maxTokens: 1800,
+          timeoutMs: REPORT_TIMEOUT_MS,
+          jsonMode: false,
+        })
+      ),
+    ]);
 
-    // Prefer results in MODEL_CANDIDATES order (not arrival order) so
-    // behavior stays predictable regardless of which one answers first.
-    const full = results.find((r) => r.ok && r.hasFurniture && r.hasUsableReport);
-    if (full) {
-      res.status(200).json({ report: full.report, furniture: full.furniture });
+    const furniture = layoutOutcome.success ? extractFurniture(layoutOutcome.success.rawText) : null;
+    const report = reportOutcome.success && isUsableReport(reportOutcome.success.rawText)
+      ? reportOutcome.success.rawText.trim()
+      : null;
+
+    if (!furniture && !layoutOutcome.success) {
+      console.error('generate-plan: layout call failed on all candidates', layoutOutcome.results.map((r) => ({ model: r.model, reason: r.reason })));
+    }
+    if (!report && !reportOutcome.success) {
+      console.warn('generate-plan: report call failed on all candidates', reportOutcome.results.map((r) => ({ model: r.model, reason: r.reason })));
+    }
+
+    if (furniture) {
+      // Success on the thing that actually matters. Attach the report if
+      // we got a usable one; otherwise attach a small non-blocking note.
+      const payload = { report, furniture };
+      if (!report) {
+        payload.warning = 'הפריסה הדו-ממדית נוצרה בהצלחה. התיאור המילולי לא היה זמין הפעם (לא חובה לצורך הציור).';
+      }
+      res.status(200).json(payload);
       return;
     }
 
-    const partial = results.find((r) => r.ok && (r.hasFurniture || r.hasUsableReport));
-    if (partial) {
-      console.warn(`generate-plan: falling back to partial result from ${partial.model}`);
+    // Layout failed on every candidate. If we at least got a report,
+    // surface that plus a clear explanation — otherwise raw debug text
+    // from whichever layout attempt got furthest, plus a real error.
+    if (report) {
       res.status(200).json({
-        report: partial.report || null,
-        furniture: partial.furniture || [],
-        warning: partial.hasFurniture
-          ? 'המודל לא סיפק תיאור מלא, אך הפריסה הדו-ממדית נוצרה בהצלחה.'
-          : 'המודל כתב תיאור אך לא הצליח הפעם ליצור פריסת רהיטים תקינה — לכן אין ציור דו-ממדי בניסיון הזה. נסו "צור מחדש".',
-        debugRaw: partial.report ? undefined : (partial.rawText || '').slice(0, 2000),
+        report,
+        furniture: [],
+        warning: 'המודל כתב תיאור אך לא הצליח הפעם ליצור פריסת רהיטים תקינה — לכן אין ציור דו-ממדי בניסיון הזה. נסו "צור מחדש".',
       });
       return;
     }
 
-    console.error('generate-plan: all model candidates failed', results.map((r) => ({ model: r.model, reason: r.reason })));
-    const anyTimeout = results.some((r) => r.reason === 'timeout');
+    const anyTimeout = layoutOutcome.results.some((r) => r.reason === 'timeout');
+    const bestRaw = layoutOutcome.results.find((r) => r.ok && r.rawText)?.rawText;
+    console.error('generate-plan: total failure', {
+      layout: layoutOutcome.results.map((r) => ({ model: r.model, reason: r.reason })),
+      report: reportOutcome.results.map((r) => ({ model: r.model, reason: r.reason })),
+    });
     res.status(502).json({
       error: anyTimeout
-        ? 'המודלים החינמיים לא הגיבו בזמן. נסו שוב בעוד רגע — לפעמים זה עומס זמני על שכבת החינם של OpenRouter.'
+        ? 'המודלים החינמיים הזמינים כרגע איטיים מדי ולא הגיבו בזמן. נסו "צור מחדש" — לרוב זה עובד בניסיון נוסף.'
         : 'כל המודלים החינמיים הזמינים כרגע נכשלו במענה לבקשה. נסו שוב בעוד רגע.',
+      debugRaw: bestRaw ? bestRaw.slice(0, 1000) : undefined,
     });
   } catch (err) {
     console.error('generate-plan: unexpected error', err);
@@ -334,8 +365,8 @@ module.exports = async function handler(req, res) {
   }
 };
 
-// Ask Vercel for more than the ~10s default so a slow-but-successful free
-// model still gets to finish. Hobby plan supports up to 60s — we ask for
-// the full 60 to give our 45s per-call timeout real headroom (parallel
-// calls mean total time ≈ the slowest one, not the sum of all of them).
-module.exports.config = { maxDuration: 60 };
+// Vercel Hobby (with Fluid Compute, which is on by default) allows up to
+// 300s — we ask for 120s, comfortably above LAYOUT_TIMEOUT_MS +
+// REPORT_TIMEOUT_MS running in parallel (bounded by the slower one,
+// ~90s) plus overhead.
+module.exports.config = { maxDuration: 120 };

@@ -461,7 +461,16 @@
       }
 
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || `שגיאת שרת (${response.status})`);
+      if (!response.ok) {
+        if (data.debugRaw) {
+          document.getElementById('reportContent').innerHTML =
+            `<div class="report-section"><h3>תשובה גולמית מהמודל (לצורך דיבוג)</h3>
+             <pre class="image-prompt">${escapeXml(data.debugRaw)}</pre></div>`;
+          document.getElementById('planSection').hidden = true;
+          document.getElementById('resultBox').hidden = false;
+        }
+        throw new Error(data.error || `שגיאת שרת (${response.status})`);
+      }
 
       if (data.warning) {
         const banner = document.getElementById('warnBanner');
