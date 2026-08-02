@@ -406,7 +406,11 @@
 
   function renderReport(report) {
     const sections = splitSections(report);
-    if (!sections.length) return '<p>לא התקבל תיאור מהמודל.</p>';
+    if (!sections.length) {
+      // The model wrote something, just not with our "# 1. ..." headers —
+      // show it as-is rather than throwing away real content.
+      return `<div class="report-section"><p style="color:var(--muted); margin-bottom:10px;">המודל לא עקב אחרי מבנה הסעיפים המבוקש, אז הנה התשובה כפי שהתקבלה:</p>${renderSectionBody(report)}</div>`;
+    }
     return sections.map(s => {
       const isColor = /פלטת צבעים|color palette/i.test(s.title);
       const isImagePrompt = /image prompt|פרומפט תמונה/i.test(s.title);

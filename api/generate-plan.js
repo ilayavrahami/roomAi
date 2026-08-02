@@ -315,7 +315,7 @@ module.exports = async function handler(req, res) {
         furniture: partial.furniture || [],
         warning: partial.hasFurniture
           ? 'המודל לא סיפק תיאור מלא, אך הפריסה הדו-ממדית נוצרה בהצלחה.'
-          : 'המודל סיפק תיאור אך לא הצליח ליצור תוכנית JSON תקינה לפריסת הרהיטים. נסו שוב.',
+          : 'המודל כתב תיאור אך לא הצליח הפעם ליצור פריסת רהיטים תקינה — לכן אין ציור דו-ממדי בניסיון הזה. נסו "צור מחדש".',
         debugRaw: partial.report ? undefined : (partial.rawText || '').slice(0, 2000),
       });
       return;
