@@ -11,8 +11,13 @@
    דרך Git (מומלץ) או גרירת התיקייה ל-Netlify Drop.
 
 2. **קבלו מפתח API מ-OpenRouter**: היכנסו ל-https://openrouter.ai ,
-   Sign in → Keys → Create Key. טענו יתרה (credits) בחשבון — כל מודלי
-   DeepSeek ב-OpenRouter הם בתשלום (אין יותר גרסאות :free).
+   Sign in → Keys → Create Key. **הערה:** נכון לאמצע 2026, למודלי
+   DeepSeek אין יותר גרסאות `:free` ב-OpenRouter — הפונקציה מוגדרת
+   כרגע להשתמש ב-`openrouter/free`, ה-auto-router של OpenRouter
+   שבוחר אוטומטית מודל חינמי זמין (מתחלף מדי פעם ככל שספקים
+   מכניסים/מוציאים הצעות חינמיות). מפתח API עדיין נדרש (ליצירתו
+   אין עלות), אבל אין צורך לטעון קרדיט כדי להשתמש במסלול הזה —
+   רק אם תרצו לעבור למודל בתשלום ספציפי (ראו "החלפת מודל" למטה).
 
 3. **הגדירו את משתנה הסביבה ב-Netlify**:
    Site settings → Environment variables → Add a variable
@@ -65,6 +70,14 @@ OPENROUTER_API_KEY=sk-or-v1-xxxxxxxxxxxxxxxx
 ## החלפת מודל
 
 המודל מוגדר בקובץ `netlify/functions/generate-plan.js`, קבוע `MODEL`.
-כרגע: `deepseek/deepseek-v4-flash` (מהיר וזול, מתאים למשימת JSON מובנית
-כזו). אם תרצו יותר "חשיבה"/דיוק על חשבון מהירות ומחיר, אפשר להחליף ל-
-`deepseek/deepseek-v4-pro`.
+כרגע: `openrouter/free` — ה-auto-router של OpenRouter, שבוחר בכל בקשה
+מודל חינמי זמין. יתרון: אין עלות ואין תלות במודל ספציפי שעלול
+להיעלם. חיסרון: איכות/עקביות הפלט יכולות להשתנות בין קריאה לקריאה,
+כי לא תמיד אותו מודל עונה. הקוד כבר בנוי לכך — הוא מנסה לבקש JSON
+מובנה (`response_format`), ונופל בחזרה על חילוץ JSON בעזרת regex אם
+המודל שנבחר לא תומך בכך.
+
+אם תרצו יציבות ואיכות גבוהה יותר על חשבון תשלום, אפשר להחליף בחזרה
+למודל DeepSeek קבוע, למשל `deepseek/deepseek-v4-flash` (מהיר וזול)
+או `deepseek/deepseek-v4-pro` (יותר "חשיבה"/דיוק) — במקרה הזה תצטרכו
+לטעון קרדיט בחשבון ה-OpenRouter.

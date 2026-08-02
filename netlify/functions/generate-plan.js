@@ -15,7 +15,13 @@
 // the browser should always get valid JSON to parse.
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
-const MODEL = 'deepseek/deepseek-v4-flash'; // fast + cheap, good enough for structured JSON layout tasks
+// OpenRouter's free auto-router: picks whichever free model is currently
+// available instead of a pinned slug, so this keeps working as providers
+// rotate their free lineup in and out (DeepSeek itself has no free models
+// on OpenRouter as of mid-2026 — see README troubleshooting section).
+// Trade-off: quality/latency vary by whichever model gets picked, and it's
+// shared/rate-limited across all OpenRouter free-tier traffic.
+const MODEL = 'openrouter/free';
 
 const SYSTEM_PROMPT = `אתה אדריכל פנים בכיר ומנוע תכנון חללים. תפקידך לקבל נתוני חדר ולהחזיר אך ורק אובייקט JSON תקין (ללא טקסט נוסף, ללא Markdown) בפורמט הבא:
 {"furniture": [ ... ]}
@@ -107,9 +113,18 @@ exports.handler = async (event) => {
 
     const userMsg = `נתוני החדר:\n${JSON.stringify(room, null, 2)}`;
 
-    let orResponse;
-    try {
-      orResponse = await fetch(OPENROUTER_URL, {
+    const baseRequestBody = {
+      model: MODEL,
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: userMsg },
+      ],
+      temperature: 0.4,
+      max_tokens: 1500,
+    };
+
+    const callOpenRouter = (body) =>
+      fetch(OPENROUTER_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -118,19 +133,21 @@ exports.handler = async (event) => {
           'HTTP-Referer': 'https://roomai.example.com',
           'X-Title': 'RoomAI',
         },
-        body: JSON.stringify({
-          model: MODEL,
-          messages: [
-            { role: 'system', content: SYSTEM_PROMPT },
-            { role: 'user', content: userMsg },
-          ],
-          temperature: 0.4,
-          max_tokens: 1500,
-          // Ask OpenRouter/DeepSeek to guarantee a parsable JSON body,
-          // instead of relying purely on prompt instructions.
-          response_format: { type: 'json_object' },
-        }),
+        body: JSON.stringify(body),
       });
+
+    let orResponse;
+    try {
+      // openrouter/free can land on any one of several rotating free
+      // models, and not all of them support strict JSON mode. Ask for it
+      // first; if the provider rejects the param outright, retry once
+      // without it and lean on extractFurniture()'s regex fallback below.
+      orResponse = await callOpenRouter({ ...baseRequestBody, response_format: { type: 'json_object' } });
+
+      if (!orResponse.ok && orResponse.status === 400) {
+        console.warn('generate-plan: retrying without response_format (model may not support it)');
+        orResponse = await callOpenRouter(baseRequestBody);
+      }
     } catch (networkErr) {
       console.error('generate-plan: network error calling OpenRouter', networkErr);
       return jsonResponse(502, { error: 'לא ניתן היה להתחבר לשרת ה-AI. נסו שוב.' });
