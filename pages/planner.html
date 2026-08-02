@@ -192,26 +192,38 @@
 
       <div id="generatingBox" class="generating" hidden>
         <div class="spinner"></div>
-        <p>מכינים את חבילת הנתונים לתכנון...</p>
+        <p>ה-AI מתכנן את החדר שלכם — זה עשוי לקחת עד דקה...</p>
       </div>
 
+      <div class="summary-warning" id="errorBox" hidden style="background:#fef2f2; border-color:#fecaca; color:#991b1b;"></div>
+
       <div id="resultBox" hidden>
-        <div class="summary-warning" style="background:#eff6ff; border-color:#93c5fd; color:#1e3a8a;">
-          כדי לקבל תכנון בפועל (פריסות, פלטת צבעים, רשימת קניות והדמיה) יש להעביר את חבילת ה-JSON וה-System Prompt שלכם למנוע AI מחובר (למשל דרך שרת Backend עם מפתח API). הכלי הזה אוסף ומארגן את הנתונים בשבילכם, מוכן להעתקה ושליחה.
+        <div class="summary-warning" id="warnBanner" hidden style="background:#fff7ed; border-color:#fdba74; color:#9a3412;"></div>
+
+        <div id="reportContent"></div>
+
+        <div id="planSection" hidden>
+          <h3 style="margin:26px 0 14px;">פריסת החדר — תצוגת 2D</h3>
+          <div class="plan-wrap" id="planWrap"></div>
+          <div class="legend" id="legend"></div>
+          <div class="furniture-list" id="furnitureList"></div>
         </div>
-        <div class="field">
-          <label>JSON לשליחה למנוע ה-AI</label>
-          <textarea id="jsonOutput" readonly style="min-height:220px; font-family:monospace; direction:ltr; text-align:left;"></textarea>
-        </div>
-        <div class="step-actions" style="justify-content:flex-start; gap:14px;">
+
+        <details style="margin-top:18px;">
+          <summary style="cursor:pointer; font-weight:700; font-size:13.5px; color:var(--muted);">הצג JSON גולמי של הריהוט</summary>
+          <pre id="rawJson" style="background:#0f172a; color:#c7d2fe; padding:16px; border-radius:10px; font-size:12px; overflow:auto; margin-top:10px; direction:ltr; text-align:left;"></pre>
+        </details>
+
+        <div class="step-actions" style="justify-content:flex-start; gap:14px; margin-top:24px;">
           <button type="button" class="button secondary" id="copyJsonBtn">העתק JSON</button>
+          <button type="button" class="button ghost" id="regenerateBtn">צור מחדש</button>
           <button type="button" class="button ghost" id="startOverBtn">התחל תכנון חדש</button>
         </div>
       </div>
 
       <div class="step-actions" id="reviewActions">
         <button type="button" class="button ghost" data-prev>→ חזרה</button>
-        <button type="button" class="button" id="generateBtn">צור תכנון →</button>
+        <button type="button" class="button" id="generateBtn">✨ צור תכנון עם AI →</button>
       </div>
 
       <p class="autosave-note">הנתונים שלכם נשמרים אוטומטית בדפדפן — אפשר לחזור בכל שלב.</p>

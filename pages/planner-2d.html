@@ -448,6 +448,13 @@ document.getElementById('generateBtn').addEventListener('click', async () => {
       banner.textContent = data.warning;
       banner.style.display = 'block';
     }
+    if(data.debugRaw){
+      document.getElementById('reportContent').innerHTML =
+        `<div class="report-section"><h3>תשובה גולמית מהמודל</h3>
+         <p style="color:var(--muted);">לא הצלחנו לפרש את התשובה למבנה הצפוי, אז הנה מה שהמודל החזיר בפועל:</p>
+         <pre class="image-prompt">${escapeXml(data.debugRaw)}</pre></div>`;
+      document.getElementById('reportPanel').style.display = 'block';
+    }
 
     const furniture = Array.isArray(data.furniture) ? data.furniture : [];
     if(furniture.length === 0){

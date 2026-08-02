@@ -296,3 +296,24 @@ input[type="range"]{
   color:var(--muted);
   margin-top:18px;
 }
+
+/* ---------- AI result: report + 2D plan (shared with planner-2d.html) ---------- */
+.report-section{ margin-bottom:22px; }
+.report-section:last-child{ margin-bottom:0; }
+.report-section h3{ font-size:16.5px; margin-bottom:10px; color:var(--ink); }
+.report-section p{ line-height:1.8; margin-bottom:8px; font-size:14.5px; color:var(--text); }
+.report-section ul{ margin:0 0 8px 0; padding-inline-start:22px; }
+.report-section li{ line-height:1.8; font-size:14.5px; color:var(--text); margin-bottom:4px; }
+.swatches{ display:flex; gap:10px; margin-bottom:12px; flex-wrap:wrap; }
+.swatch{ width:34px; height:34px; border-radius:8px; border:2px solid rgba(0,0,0,.08); display:inline-block; }
+.image-prompt{ background:var(--ink); color:#c7d2fe; padding:16px; border-radius:10px; font-size:12.5px; white-space:pre-wrap; direction:ltr; text-align:left; overflow:auto; }
+
+.plan-wrap{ text-align:center; margin-top:6px; }
+.plan-wrap svg{ max-width:100%; height:auto; border-radius:14px; background:#fbfdff; border:2px solid var(--border); }
+
+.legend{ display:flex; flex-wrap:wrap; gap:14px; justify-content:center; margin-top:16px; font-size:13px; color:#444; }
+.legend span.sw{ display:inline-block; width:13px; height:13px; border-radius:3px; margin-inline-end:6px; vertical-align:-2px; }
+
+.furniture-list{ margin-top:22px; display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:10px; }
+.f-item{ border:2px solid var(--border); border-radius:10px; padding:10px 14px; font-size:13.5px; }
+.f-item b{ display:block; font-size:14.5px; margin-bottom:2px; }

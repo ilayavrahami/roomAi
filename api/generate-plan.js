@@ -15,11 +15,21 @@
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
-// OpenRouter's free auto-router: picks whichever free model is currently
-// available instead of a pinned slug, so this keeps working as providers
-// rotate their free lineup in and out. Trade-off: quality/latency/context
-// limits vary by whichever model gets picked.
-const MODEL = 'openrouter/free';
+// A ranked list of specific free, non-OpenAI models to try, instead of
+// relying on OpenRouter's random "openrouter/free" auto-router — that
+// router can land on a weak free model that ignores complex multi-section
+// instructions entirely, which is what produced the empty/unparseable
+// response. We try each candidate in order and stop at the first one
+// that returns text we can actually extract a report + JSON from.
+// NOTE: free model IDs on OpenRouter churn every few weeks — if all of
+// these ever return 404, check https://openrouter.ai/models?max_price=0
+// and update this list.
+const MODEL_CANDIDATES = [
+  'nvidia/nemotron-3-super-120b-a12b:free', // tuned for structured output
+  'z-ai/glm-4.5-air:free',                  // solid general-purpose free model
+  'inclusionai/ling-3.0-flash:free',        // fast, decent instruction-following
+  'openrouter/free',                        // last resort: whatever's currently free
+];
 
 // The response now mixes a long-form Hebrew design write-up with a JSON
 // payload at the end, so we no longer force response_format: json_object
@@ -213,9 +223,8 @@ module.exports = async function handler(req, res) {
 
     const userPrompt = buildUserPrompt(room);
 
-    let orResponse;
-    try {
-      orResponse = await fetch(OPENROUTER_URL, {
+    const callModel = (model) =>
+      fetch(OPENROUTER_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -224,7 +233,7 @@ module.exports = async function handler(req, res) {
           'X-Title': 'RoomAI',
         },
         body: JSON.stringify({
-          model: MODEL,
+          model,
           messages: [
             { role: 'system', content: SYSTEM_PROMPT },
             { role: 'user', content: userPrompt },
@@ -232,55 +241,83 @@ module.exports = async function handler(req, res) {
           temperature: 0.6,
           // The write-up (sections 1-6) plus the JSON section needs real
           // room — 1500 tokens was cutting the response off before the
-          // JSON block ever appeared, which is the most likely cause of
-          // the "לא התקבל JSON תקין" error you hit.
+          // JSON block ever appeared, which is one cause of failures.
           max_tokens: 4000,
         }),
       });
-    } catch (networkErr) {
-      console.error('generate-plan: network error calling OpenRouter', networkErr);
-      res.status(502).json({ error: 'לא ניתן היה להתחבר לשרת ה-AI. נסו שוב.' });
-      return;
+
+    let bestAttempt = null; // { model, rawText, report, furniture }
+    let lastHttpError = null;
+
+    for (const model of MODEL_CANDIDATES) {
+      let orResponse;
+      try {
+        orResponse = await callModel(model);
+      } catch (networkErr) {
+        console.warn(`generate-plan: network error calling ${model}`, networkErr);
+        lastHttpError = 'network';
+        continue;
+      }
+
+      if (!orResponse.ok) {
+        const errText = await orResponse.text().catch(() => '');
+        console.warn(`generate-plan: ${model} returned ${orResponse.status}`, errText.slice(0, 300));
+        lastHttpError = orResponse.status;
+        continue; // try the next candidate
+      }
+
+      let data;
+      try {
+        data = await orResponse.json();
+      } catch (parseErr) {
+        console.warn(`generate-plan: ${model} response was not JSON`, parseErr);
+        continue;
+      }
+
+      const rawText = data?.choices?.[0]?.message?.content || '';
+      const finishReason = data?.choices?.[0]?.finish_reason;
+      if (finishReason === 'length') {
+        console.warn(`generate-plan: ${model} completion was truncated (hit max_tokens)`);
+      }
+
+      const furniture = extractFurniture(rawText);
+      const report = extractReport(rawText);
+      const hasUsableReport = report && report.length > 30;
+
+      // Keep the most useful attempt so far, in case every candidate
+      // ends up partial and we need to fall back to the best of a bad lot.
+      if (!bestAttempt || (furniture && !bestAttempt.furniture) || (hasUsableReport && !bestAttempt.report)) {
+        bestAttempt = { model, rawText, report: hasUsableReport ? report : bestAttempt?.report, furniture: furniture || bestAttempt?.furniture };
+      }
+
+      if (furniture && hasUsableReport) {
+        // Full success — no need to try further candidates.
+        res.status(200).json({ report, furniture });
+        return;
+      }
     }
 
-    if (!orResponse.ok) {
-      const errText = await orResponse.text().catch(() => '');
-      console.error('OpenRouter error', orResponse.status, errText);
-      res.status(502).json({ error: `שגיאה משרת ה-AI (${orResponse.status})` });
-      return;
-    }
-
-    let data;
-    try {
-      data = await orResponse.json();
-    } catch (parseErr) {
-      console.error('generate-plan: OpenRouter response was not JSON', parseErr);
-      res.status(502).json({ error: 'תשובה לא תקינה משרת ה-AI' });
-      return;
-    }
-
-    const rawText = data?.choices?.[0]?.message?.content || '';
-    const finishReason = data?.choices?.[0]?.finish_reason;
-    if (finishReason === 'length') {
-      console.warn('generate-plan: completion was truncated (hit max_tokens)');
-    }
-
-    const furniture = extractFurniture(rawText);
-    const report = extractReport(rawText);
-
-    if (!furniture) {
-      console.error('generate-plan: no usable furniture JSON in model output:', rawText.slice(-500));
-      // Degrade gracefully: if we at least got the design write-up, show
-      // that instead of failing the whole request outright.
+    // Every candidate was partial or failed outright.
+    if (bestAttempt && (bestAttempt.furniture || bestAttempt.report)) {
+      console.warn(`generate-plan: falling back to partial result from ${bestAttempt.model}`);
       res.status(200).json({
-        report: report || null,
-        furniture: [],
-        warning: 'המודל החזיר תיאור אך לא התקבלה ממנו תוכנית JSON תקינה לפריסת הרהיטים. נסו שוב.',
+        report: bestAttempt.report || null,
+        furniture: bestAttempt.furniture || [],
+        warning: bestAttempt.furniture
+          ? 'המודל לא סיפק תיאור מלא, אך הפריסה הדו-ממדית נוצרה בהצלחה.'
+          : 'המודל סיפק תיאור אך לא הצליח ליצור תוכנית JSON תקינה לפריסת הרהיטים. נסו שוב — לפעמים ניסיון חוזר עובר על מודל שונה.',
+        // Surface the raw text too so you're not left guessing what the
+        // model actually said — this is exactly what "no report at all"
+        // looked like from the outside; now you can see why.
+        debugRaw: bestAttempt.report ? undefined : bestAttempt.rawText.slice(0, 2000),
       });
       return;
     }
 
-    res.status(200).json({ report, furniture });
+    console.error('generate-plan: all model candidates failed', { lastHttpError });
+    res.status(502).json({
+      error: 'כל המודלים החינמיים הזמינים כרגע נכשלו במענה לבקשה. נסו שוב בעוד רגע (יתכן עומס זמני על השכבה החינמית של OpenRouter).',
+    });
   } catch (err) {
     console.error('generate-plan: unexpected error', err);
     res.status(500).json({ error: 'שגיאה לא צפויה בשרת. נסו שוב.' });

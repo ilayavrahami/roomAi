@@ -277,50 +277,259 @@
     }
   }
 
-  /* ---------------- Generate JSON payload ---------------- */
+  /* ---------------- 2D rendering helpers (same approach as planner-2d.html) ---------------- */
 
-  document.getElementById('generateBtn').addEventListener('click', () => {
+  const FURNITURE_COLORS = {
+    bed:'#f59e0b', sofa:'#2563eb', desk:'#16a34a', wardrobe:'#7c3aed',
+    table:'#0d9488', chair:'#64748b', shelf:'#c026d3', nightstand:'#ea580c',
+    dresser:'#0369a1', rug:'#a3a3a3', other:'#475569'
+  };
+
+  function colorFor(type) {
+    const t = (type || '').toLowerCase();
+    for (const key in FURNITURE_COLORS) { if (t.includes(key)) return FURNITURE_COLORS[key]; }
+    return FURNITURE_COLORS.other;
+  }
+
+  function escapeXml(s) {
+    return String(s).replace(/[<>&"]/g, c => ({ '<':'&lt;', '>':'&gt;', '&':'&amp;', '"':'&quot;' }[c]));
+  }
+
+  function wallSegment(wall, x, width, room) {
+    if (wall === 'north') return { a:{x:x,y:0}, b:{x:x+width,y:0} };
+    if (wall === 'south') return { a:{x:x,y:room.roomLength}, b:{x:x+width,y:room.roomLength} };
+    if (wall === 'west')  return { a:{x:0,y:x}, b:{x:0,y:x+width} };
+    return { a:{x:room.roomWidth,y:x}, b:{x:room.roomWidth,y:x+width} }; // east
+  }
+
+  function doorGeometry(door, room) {
+    const seg = wallSegment(door.wall, door.x, door.width, room);
+    const gapStart = seg.a, gapEnd = seg.b;
+
+    let intoRoom;
+    if (door.wall === 'north') intoRoom = {x:0,y:1};
+    else if (door.wall === 'south') intoRoom = {x:0,y:-1};
+    else if (door.wall === 'west') intoRoom = {x:1,y:0};
+    else intoRoom = {x:-1,y:0};
+
+    if (door.opens === 'sliding') return { gapStart, gapEnd };
+
+    const isLeft = (door.opens || '').includes('left');
+    const hinge = isLeft ? gapStart : gapEnd;
+    const closedPoint = isLeft ? gapEnd : gapStart;
+    const isOutside = (door.opens || '').includes('outside');
+    const dir = isOutside ? {x:-intoRoom.x,y:-intoRoom.y} : intoRoom;
+    const openPoint = { x: hinge.x + dir.x*door.width, y: hinge.y + dir.y*door.width };
+    const sweep = isLeft ? 1 : 0;
+
+    return { gapStart, gapEnd, hinge, closedPoint, openPoint, sweep };
+  }
+
+  function renderPlan(room, furniture) {
+    const PAD = 40, MAXW = 780, MAXH = 560;
+    const scale = Math.min((MAXW-2*PAD)/room.roomWidth, (MAXH-2*PAD)/room.roomLength);
+    const W = room.roomWidth*scale, H = room.roomLength*scale;
+    const ox = PAD, oy = PAD;
+    const toX = cm => ox + cm*scale;
+    const toY = cm => oy + cm*scale;
+
+    let svg = `<svg viewBox="0 0 ${W+2*PAD} ${H+2*PAD}" xmlns="http://www.w3.org/2000/svg">`;
+    svg += `<rect x="${ox}" y="${oy}" width="${W}" height="${H}" fill="#ffffff" stroke="#0f172a" stroke-width="4"/>`;
+
+    (room.doors||[]).forEach(d => {
+      const geo = doorGeometry(d, room);
+      if (!geo) return;
+      const gs = geo.gapStart, ge = geo.gapEnd;
+      svg += `<line x1="${toX(gs.x)}" y1="${toY(gs.y)}" x2="${toX(ge.x)}" y2="${toY(ge.y)}" stroke="#ffffff" stroke-width="6"/>`;
+      if (geo.openPoint) {
+        svg += `<line x1="${toX(geo.hinge.x)}" y1="${toY(geo.hinge.y)}" x2="${toX(geo.openPoint.x)}" y2="${toY(geo.openPoint.y)}" stroke="#2563eb" stroke-width="2"/>`;
+        svg += `<path d="M ${toX(geo.closedPoint.x)} ${toY(geo.closedPoint.y)} A ${d.width*scale} ${d.width*scale} 0 0 ${geo.sweep} ${toX(geo.openPoint.x)} ${toY(geo.openPoint.y)}" fill="none" stroke="#93c5fd" stroke-width="1.5" stroke-dasharray="4 3"/>`;
+      } else {
+        svg += `<line x1="${toX(gs.x)}" y1="${toY(gs.y)}" x2="${toX(ge.x)}" y2="${toY(ge.y)}" stroke="#2563eb" stroke-width="3" stroke-dasharray="6 4"/>`;
+      }
+    });
+
+    (room.windows||[]).forEach(w => {
+      const geo = wallSegment(w.wall, w.x, w.width, room);
+      svg += `<line x1="${toX(geo.a.x)}" y1="${toY(geo.a.y)}" x2="${toX(geo.b.x)}" y2="${toY(geo.b.y)}" stroke="#38bdf8" stroke-width="7"/>`;
+    });
+
+    (furniture||[]).forEach(f => {
+      const x = toX(f.x), y = toY(f.y), w = f.width*scale, h = f.length*scale;
+      const cx = x + w/2, cy = y + h/2;
+      const rot = f.rotation || 0;
+      const col = colorFor(f.type);
+      svg += `<g transform="rotate(${rot} ${cx} ${cy})">
+        <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="6" fill="${col}22" stroke="${col}" stroke-width="2"/>
+        <text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="middle" font-size="11" fill="${col}" font-weight="700">${escapeXml(f.name||f.type||'')}</text>
+      </g>`;
+    });
+
+    svg += `</svg>`;
+    return svg;
+  }
+
+  /* ---------------- Report rendering (sections 1-6 from the model) ---------------- */
+
+  function splitSections(report) {
+    const lines = String(report || '').split(/\r?\n/);
+    const sections = [];
+    let curr = null;
+    lines.forEach(line => {
+      const m = line.match(/^#\s*\d*\.?\s*(.+)$/);
+      if (m) {
+        if (curr) sections.push(curr);
+        curr = { title: m[1].trim(), body: [] };
+      } else if (curr) {
+        curr.body.push(line);
+      }
+    });
+    if (curr) sections.push(curr);
+    return sections.map(s => ({ title: s.title, body: s.body.join('\n').trim() }));
+  }
+
+  function renderSectionBody(text) {
+    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    let html = '', inList = false;
+    lines.forEach(line => {
+      if (/^[-*]\s+/.test(line)) {
+        if (!inList) { html += '<ul>'; inList = true; }
+        html += `<li>${escapeXml(line.replace(/^[-*]\s+/, ''))}</li>`;
+      } else {
+        if (inList) { html += '</ul>'; inList = false; }
+        html += `<p>${escapeXml(line)}</p>`;
+      }
+    });
+    if (inList) html += '</ul>';
+    return html;
+  }
+
+  function renderReport(report) {
+    const sections = splitSections(report);
+    if (!sections.length) return '<p>לא התקבל תיאור מהמודל.</p>';
+    return sections.map(s => {
+      const isColor = /פלטת צבעים|color palette/i.test(s.title);
+      const isImagePrompt = /image prompt|פרומפט תמונה/i.test(s.title);
+
+      if (isImagePrompt) {
+        return `<div class="report-section"><h3>${escapeXml(s.title)}</h3><pre class="image-prompt">${escapeXml(s.body)}</pre></div>`;
+      }
+
+      let swatches = '';
+      if (isColor) {
+        const hexes = [...new Set((s.body.match(/#[0-9a-fA-F]{6}/g) || []))];
+        if (hexes.length) {
+          swatches = `<div class="swatches">${hexes.map(h => `<span class="swatch" style="background:${h}" title="${h}"></span>`).join('')}</div>`;
+        }
+      }
+
+      return `<div class="report-section"><h3>${escapeXml(s.title)}</h3>${swatches}${renderSectionBody(s.body)}</div>`;
+    }).join('');
+  }
+
+  /* ---------------- Generate with AI ---------------- */
+
+  async function runGeneration() {
     const s = collectState();
 
+    document.getElementById('errorBox').hidden = true;
+    document.getElementById('resultBox').hidden = true;
+    document.getElementById('warnBanner').hidden = true;
     document.getElementById('reviewActions').hidden = true;
     document.getElementById('generatingBox').hidden = false;
 
-    setTimeout(() => {
-      const payload = {
-        room: {
-          type: s.roomType,
-          width: Number(s.roomWidth),
-          length: Number(s.roomLength),
-          height: Number(s.roomHeight),
-        },
-        doors: s.doors,
-        windows: s.windows,
-        constraints: {
-          acLocation: s.acLocation || null,
-          outlets: s.outlets || null,
-          radiator: s.radiator || null,
-          keepFurniture: s.keepFurniture || null,
-          notes: s.notes || null,
-        },
-        budget: Number(s.budget),
-        stylePreferences: s.style ? [s.style] : [],
-      };
+    try {
+      const response = await fetch('/api/generate-plan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ room: s }),
+      });
 
-      document.getElementById('jsonOutput').value = JSON.stringify(payload, null, 2);
-      document.getElementById('generatingBox').hidden = true;
+      const contentType = response.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        const text = await response.text();
+        console.error('generate-plan: non-JSON response', response.status, text.slice(0, 300));
+        throw new Error(
+          response.status === 404
+            ? 'פונקציית השרת לא נמצאה (404). ודאו שהאתר פרוס ב-Vercel וש-api/generate-plan.js קיים בפריסה.'
+            : `השרת החזיר תגובה לא צפויה (סטטוס ${response.status}).`
+        );
+      }
+
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || `שגיאת שרת (${response.status})`);
+
+      if (data.warning) {
+        const banner = document.getElementById('warnBanner');
+        banner.textContent = data.warning;
+        banner.hidden = false;
+      }
+
+      if (data.debugRaw) {
+        document.getElementById('reportContent').innerHTML =
+          `<div class="report-section"><h3>תשובה גולמית מהמודל</h3>
+           <p style="color:var(--muted);">לא הצלחנו לפרש את התשובה למבנה הצפוי, אז הנה מה שהמודל החזיר בפועל:</p>
+           <pre class="image-prompt">${escapeXml(data.debugRaw)}</pre></div>`;
+      } else if (data.report) {
+        document.getElementById('reportContent').innerHTML = renderReport(data.report);
+      } else {
+        document.getElementById('reportContent').innerHTML = '';
+      }
+
+      const furniture = Array.isArray(data.furniture) ? data.furniture : [];
+      const planSection = document.getElementById('planSection');
+      if (furniture.length) {
+        document.getElementById('planWrap').innerHTML = renderPlan(s, furniture);
+        document.getElementById('rawJson').textContent = JSON.stringify(furniture, null, 2);
+
+        const usedTypes = [...new Set(furniture.map(f => (f.type||'other').toLowerCase()))];
+        document.getElementById('legend').innerHTML = usedTypes.map(t =>
+          `<div><span class="sw" style="background:${colorFor(t)}"></span>${t}</div>`
+        ).join('') + `<div><span class="sw" style="background:#38bdf8"></span>חלון</div><div><span class="sw" style="background:#2563eb"></span>דלת</div>`;
+
+        document.getElementById('furnitureList').innerHTML = furniture.map(f =>
+          `<div class="f-item"><b>${escapeXml(f.name||f.type)}</b>${f.width}×${f.length} ס"מ · סיבוב ${f.rotation||0}°</div>`
+        ).join('');
+        planSection.hidden = false;
+      } else {
+        planSection.hidden = true;
+        document.getElementById('rawJson').textContent = '';
+      }
+
+      if (!data.report && !data.debugRaw && furniture.length === 0) {
+        throw new Error('לא התקבל תוכן שמיש מהמודל. נסו שוב.');
+      }
+
       document.getElementById('resultBox').hidden = false;
-      RoomAIUI.toast('חבילת הנתונים מוכנה', 'success');
-    }, 700);
-  });
+      RoomAIUI.toast('התכנון מוכן', 'success');
+    } catch (err) {
+      console.error(err);
+      const box = document.getElementById('errorBox');
+      box.textContent = 'אירעה שגיאה ביצירת התכנון: ' + err.message;
+      box.hidden = false;
+      document.getElementById('reviewActions').hidden = false;
+      RoomAIUI.toast('אירעה שגיאה', 'error');
+    } finally {
+      document.getElementById('generatingBox').hidden = true;
+    }
+  }
+
+  document.getElementById('generateBtn').addEventListener('click', runGeneration);
+  document.getElementById('regenerateBtn').addEventListener('click', runGeneration);
 
   document.getElementById('copyJsonBtn').addEventListener('click', async () => {
-    const textarea = document.getElementById('jsonOutput');
+    const text = document.getElementById('rawJson').textContent;
+    if (!text) { RoomAIUI.toast('אין עדיין JSON להעתקה', 'error'); return; }
     try {
-      await navigator.clipboard.writeText(textarea.value);
+      await navigator.clipboard.writeText(text);
       RoomAIUI.toast('הועתק ללוח', 'success');
     } catch {
-      textarea.select();
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
       document.execCommand('copy');
+      ta.remove();
       RoomAIUI.toast('הועתק ללוח', 'success');
     }
   });
