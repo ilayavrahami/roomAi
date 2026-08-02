@@ -66,6 +66,17 @@ input[type=range]{ width:100%; accent-color:var(--blue); }
 .f-item{ border:2px solid var(--border); border-radius:10px; padding:10px 14px; font-size:13.5px; }
 .f-item b{ display:block; font-size:14.5px; margin-bottom:2px; }
 
+.report-section{ margin-bottom:22px; }
+.report-section:last-child{ margin-bottom:0; }
+.report-section h3{ font-size:16.5px; margin-bottom:10px; color:var(--ink); }
+.report-section p{ line-height:1.8; margin-bottom:8px; font-size:14.5px; color:#333; }
+.report-section ul{ margin:0 0 8px 0; padding-inline-start:22px; }
+.report-section li{ line-height:1.8; font-size:14.5px; color:#333; margin-bottom:4px; }
+.swatches{ display:flex; gap:10px; margin-bottom:12px; flex-wrap:wrap; }
+.swatch{ width:34px; height:34px; border-radius:8px; border:2px solid rgba(0,0,0,.08); display:inline-block; }
+.image-prompt{ background:#0f172a; color:#c7d2fe; padding:16px; border-radius:10px; font-size:12.5px; white-space:pre-wrap; direction:ltr; text-align:left; }
+.warn-banner{ background:#fff7ed; border:2px solid #fdba74; color:#9a3412; border-radius:12px; padding:14px 18px; font-size:14px; margin-bottom:18px; }
+
 details{ margin-top:18px; }
 summary{ cursor:pointer; font-weight:700; font-size:13.5px; color:var(--muted); }
 pre{ background:#0f172a; color:#c7d2fe; padding:16px; border-radius:10px; font-size:12px; overflow:auto; margin-top:10px; direction:ltr; text-align:left; }
@@ -128,6 +139,12 @@ pre{ background:#0f172a; color:#c7d2fe; padding:16px; border-radius:10px; font-s
     <button type="button" class="btn" id="generateBtn">✨ צור פריסת חדר עם AI</button>
     <div class="status" id="statusBox" style="display:none;"><div class="spinner"></div><span id="statusText">חושבים על פריסה מיטבית...</span></div>
     <div class="error-box" id="errorBox" style="display:none;"></div>
+  </div>
+
+  <div class="panel" id="reportPanel" style="display:none;">
+    <h2>התכנון שלכם</h2>
+    <div id="warnBanner" class="warn-banner" style="display:none;"></div>
+    <div id="reportContent"></div>
   </div>
 
   <div class="panel" id="resultPanel" style="display:none;">
@@ -289,6 +306,63 @@ function renderPlan(room, furniture){
 
 function escapeXml(s){ return String(s).replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c])); }
 
+/* ============ Report rendering (sections 1-6 from the model) ============ */
+function splitSections(report){
+  const lines = String(report||'').split(/\r?\n/);
+  const sections = [];
+  let current = null;
+  lines.forEach(line => {
+    const m = line.match(/^#\s*\d*\.?\s*(.+)$/);
+    if(m){
+      if(current) sections.push(current);
+      current = { title: m[1].trim(), body: [] };
+    } else if(current){
+      current.body.push(line);
+    }
+  });
+  if(current) sections.push(current);
+  return sections.map(s => ({ title: s.title, body: s.body.join('\n').trim() }));
+}
+
+function renderSectionBody(text){
+  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  let html = '', inList = false;
+  lines.forEach(line => {
+    if(/^[-*]\s+/.test(line)){
+      if(!inList){ html += '<ul>'; inList = true; }
+      html += `<li>${escapeXml(line.replace(/^[-*]\s+/,''))}</li>`;
+    } else {
+      if(inList){ html += '</ul>'; inList = false; }
+      html += `<p>${escapeXml(line)}</p>`;
+    }
+  });
+  if(inList) html += '</ul>';
+  return html;
+}
+
+function renderReport(report){
+  const sections = splitSections(report);
+  if(!sections.length) return '<p>לא התקבל תיאור מהמודל.</p>';
+  return sections.map(s => {
+    const isColor = /פלטת צבעים|color palette/i.test(s.title);
+    const isImagePrompt = /image prompt|פרומפט תמונה/i.test(s.title);
+
+    if(isImagePrompt){
+      return `<div class="report-section"><h3>${escapeXml(s.title)}</h3><pre class="image-prompt">${escapeXml(s.body)}</pre></div>`;
+    }
+
+    let swatches = '';
+    if(isColor){
+      const hexes = [...new Set((s.body.match(/#[0-9a-fA-F]{6}/g)||[]))];
+      if(hexes.length){
+        swatches = `<div class="swatches">${hexes.map(h => `<span class="swatch" style="background:${h}" title="${h}"></span>`).join('')}</div>`;
+      }
+    }
+
+    return `<div class="report-section"><h3>${escapeXml(s.title)}</h3>${swatches}${renderSectionBody(s.body)}</div>`;
+  }).join('');
+}
+
 // returns {a,b} points along a wall for a segment starting at offset `x` with given `width`
 function wallSegment(wall, x, width, room){
   if(wall === 'north') return { a:{x:x,y:0}, b:{x:x+width,y:0} };
@@ -327,13 +401,16 @@ document.getElementById('generateBtn').addEventListener('click', async () => {
 
   document.getElementById('errorBox').style.display = 'none';
   document.getElementById('resultPanel').style.display = 'none';
+  document.getElementById('reportPanel').style.display = 'none';
+  document.getElementById('warnBanner').style.display = 'none';
   document.getElementById('statusBox').style.display = 'flex';
   document.getElementById('generateBtn').disabled = true;
 
   // The system prompt and the OpenRouter call itself now live server-side
   // in api/generate-plan.js (Vercel Serverless Function) — the API key
-  // never reaches the browser. We just send the room data and get
-  // furniture back.
+  // never reaches the browser. We just send the room data and get back
+  // { report, furniture } (or a warning if the layout JSON couldn't be
+  // parsed but a report was still produced).
   try{
     const response = await fetch("/api/generate-plan", {
       method: "POST",
@@ -361,22 +438,36 @@ document.getElementById('generateBtn').addEventListener('click', async () => {
       throw new Error(data.error || `שגיאת שרת (${response.status})`);
     }
 
-    const furniture = data.furniture;
-    if(!Array.isArray(furniture)) throw new Error('לא התקבל JSON תקין מהמודל');
+    // Report (sections 1-6)
+    if(data.report){
+      document.getElementById('reportContent').innerHTML = renderReport(data.report);
+      document.getElementById('reportPanel').style.display = 'block';
+    }
+    if(data.warning){
+      const banner = document.getElementById('warnBanner');
+      banner.textContent = data.warning;
+      banner.style.display = 'block';
+    }
 
-    document.getElementById('planWrap').innerHTML = renderPlan(room, furniture);
-    document.getElementById('rawJson').textContent = JSON.stringify(furniture, null, 2);
+    const furniture = Array.isArray(data.furniture) ? data.furniture : [];
+    if(furniture.length === 0){
+      if(!data.report) throw new Error('לא התקבל JSON תקין מהמודל');
+      // We at least have a report to show — skip the 2D plan silently.
+    } else {
+      document.getElementById('planWrap').innerHTML = renderPlan(room, furniture);
+      document.getElementById('rawJson').textContent = JSON.stringify(furniture, null, 2);
 
-    const usedTypes = [...new Set(furniture.map(f => (f.type||'other').toLowerCase()))];
-    document.getElementById('legend').innerHTML = usedTypes.map(t =>
-      `<div><span class="sw" style="background:${colorFor(t)}"></span>${t}</div>`
-    ).join('') + `<div><span class="sw" style="background:#38bdf8"></span>חלון</div><div><span class="sw" style="background:#2563eb"></span>דלת</div>`;
+      const usedTypes = [...new Set(furniture.map(f => (f.type||'other').toLowerCase()))];
+      document.getElementById('legend').innerHTML = usedTypes.map(t =>
+        `<div><span class="sw" style="background:${colorFor(t)}"></span>${t}</div>`
+      ).join('') + `<div><span class="sw" style="background:#38bdf8"></span>חלון</div><div><span class="sw" style="background:#2563eb"></span>דלת</div>`;
 
-    document.getElementById('furnitureList').innerHTML = furniture.map(f =>
-      `<div class="f-item"><b>${escapeXml(f.name||f.type)}</b>${f.width}×${f.length} ס"מ · סיבוב ${f.rotation||0}°</div>`
-    ).join('');
+      document.getElementById('furnitureList').innerHTML = furniture.map(f =>
+        `<div class="f-item"><b>${escapeXml(f.name||f.type)}</b>${f.width}×${f.length} ס"מ · סיבוב ${f.rotation||0}°</div>`
+      ).join('');
 
-    document.getElementById('resultPanel').style.display = 'block';
+      document.getElementById('resultPanel').style.display = 'block';
+    }
   } catch(err){
     console.error(err);
     showError('אירעה שגיאה ביצירת התכנון: ' + err.message + '. נסו שוב.');
