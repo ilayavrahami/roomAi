@@ -1,0 +1,9 @@
+{
+  "name": "roomai",
+  "version": "1.0.0",
+  "private": true,
+  "description": "RoomAI — AI interior planner (static frontend + Vercel serverless function proxying OpenRouter)",
+  "engines": {
+    "node": ">=18.x"
+  }
+}

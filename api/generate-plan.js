@@ -21,12 +21,13 @@ const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 // instructions entirely, which is what produced the empty/unparseable
 // response. We try each candidate in order and stop at the first one
 // that returns text we can actually extract a report + JSON from.
-// NOTE: free model IDs on OpenRouter churn every few weeks — if all of
-// these ever return 404, check https://openrouter.ai/models?max_price=0
-// and update this list.
+// Verified live on openrouter.ai/models (Price: Free) as of Aug 2, 2026.
+// NOTE: free model IDs on OpenRouter churn every few weeks — if these
+// start returning 404, check https://openrouter.ai/models?max_price=0
+// and update this list (check server logs for the per-model reason).
 const MODEL_CANDIDATES = [
-  'nvidia/nemotron-3-super-120b-a12b:free', // tuned for structured output
-  'z-ai/glm-4.5-air:free',                  // solid general-purpose free model
+  'google/gemma-4-31b-it:free',             // highest-quality free model currently listed
+  'nvidia/nemotron-3-super-120b-a12b:free', // tuned for structured/tool output
   'inclusionai/ling-3.0-flash:free',        // fast, decent instruction-following
   'openrouter/free',                        // last resort: whatever's currently free
 ];
