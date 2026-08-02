@@ -202,6 +202,15 @@
 
         <div id="reportContent"></div>
 
+        <div id="imageSection" hidden>
+          <h3 style="margin:26px 0 14px;">הדמיית AI של החדר</h3>
+          <div class="ai-image-wrap">
+            <div class="image-loading" id="imageLoading"><div class="spinner"></div><span>יוצר הדמיה עם Pollinations.ai...</span></div>
+            <img id="aiImage" alt="הדמיית החדר שתוכנן" style="display:none;">
+            <div class="image-error" id="imageError" style="display:none;">לא הצלחנו לטעון את ההדמיה הפעם.</div>
+          </div>
+        </div>
+
         <div id="planSection" hidden>
           <h3 style="margin:26px 0 14px;">פריסת החדר — תצוגת 2D</h3>
           <div class="plan-wrap" id="planWrap"></div>

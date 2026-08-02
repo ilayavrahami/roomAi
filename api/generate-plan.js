@@ -81,7 +81,13 @@ Write your entire response in Hebrew (except the JSON... there is no JSON here �
 2-3 sentences on lighting placement and type (ambient, task, accent).
 
 # 5. AI Image Prompt
-A single English paragraph, suitable as a prompt for an image-generation model, describing what the finished room should look like.`;
+A single English paragraph (60-100 words) for an image-generation model (Pollinations.ai / Flux), describing what the finished room should look like — as a photorealistic interior photo, not a floor plan or diagram.
+Include: room type, design style, 2-4 key furniture pieces, color palette, lighting mood, materials.
+CRITICAL: you are given the room's width/length/height in centimeters in the ROOM INFORMATION above — translate that into a visual size descriptor in the prompt. Use the floor area (width × length) as a guide:
+- Under ~9 m² (e.g. a small room): use phrases like "cozy compact layout", "small intimate room".
+- ~9–20 m²: use phrases like "comfortably sized room", "well-proportioned layout".
+- Over ~20 m²: use phrases like "spacious open layout", "airy expansive room".
+Do not just restate the numbers — express the scale in descriptive visual language a photographer/artist would use.`;
 
 function formatDoors(doors) {
   const WALL_HE = { north: 'צפוני', south: 'דרומי', east: 'מזרחי', west: 'מערבי' };
@@ -185,6 +191,38 @@ function extractFurniture(rawText) {
 
 function isUsableReport(text) {
   return !!(text && text.trim().length > 30);
+}
+
+// Pulls the "# 5. AI Image Prompt" section's body out of the report text.
+function extractImagePrompt(report) {
+  if (!report) return null;
+  const lines = report.split(/\r?\n/);
+  const headingIdx = lines.findIndex((l) => /^#\s*5\b/.test(l.trim()) || /image prompt/i.test(l));
+  if (headingIdx === -1) return null;
+  const body = lines.slice(headingIdx + 1).join('\n').trim();
+  return body.length > 15 ? body : null;
+}
+
+// Deterministic fallback if the model didn't produce a usable image
+// prompt (or failed the report call entirely) — still satisfies the
+// "must reflect room size" requirement even without the LLM's help,
+// so image generation never silently just doesn't happen.
+function buildFallbackImagePrompt(room) {
+  const ROOM_TYPE_EN = {
+    bedroom: 'bedroom', living: 'living room', kids: "kids' room",
+    office: 'home office', studio: 'studio apartment', other: 'room',
+  };
+  const roomType = ROOM_TYPE_EN[room.roomType] || 'room';
+  const style = room.style || 'modern';
+
+  const w = Number(room.roomWidth) || 0;
+  const l = Number(room.roomLength) || 0;
+  const areaM2 = (w * l) / 10000; // cm² -> m²
+  let sizeDescriptor = 'well-proportioned layout';
+  if (areaM2 && areaM2 < 9) sizeDescriptor = 'cozy compact layout, small intimate room';
+  else if (areaM2 && areaM2 > 20) sizeDescriptor = 'spacious open layout, airy expansive room';
+
+  return `A photorealistic interior photo of a ${style} style ${roomType}, ${sizeDescriptor}, natural lighting, tasteful furniture arrangement, high quality architectural photography.`;
 }
 
 async function callOpenRouter({ model, apiKey, systemPrompt, userPrompt, maxTokens, timeoutMs, jsonMode }) {
@@ -316,6 +354,10 @@ module.exports = async function handler(req, res) {
     const report = reportOutcome.success && isUsableReport(reportOutcome.success.rawText)
       ? reportOutcome.success.rawText.trim()
       : null;
+    // Always produce SOME image prompt once we have a room to describe —
+    // prefer the model's (size-aware, per the system prompt), fall back
+    // to a deterministic one computed from the actual dimensions.
+    const imagePrompt = extractImagePrompt(report) || buildFallbackImagePrompt(room);
 
     if (!furniture && !layoutOutcome.success) {
       console.error('generate-plan: layout call failed on all candidates', layoutOutcome.results.map((r) => ({ model: r.model, reason: r.reason })));
@@ -327,7 +369,7 @@ module.exports = async function handler(req, res) {
     if (furniture) {
       // Success on the thing that actually matters. Attach the report if
       // we got a usable one; otherwise attach a small non-blocking note.
-      const payload = { report, furniture };
+      const payload = { report, furniture, imagePrompt };
       if (!report) {
         payload.warning = 'הפריסה הדו-ממדית נוצרה בהצלחה. התיאור המילולי לא היה זמין הפעם (לא חובה לצורך הציור).';
       }
@@ -342,6 +384,7 @@ module.exports = async function handler(req, res) {
       res.status(200).json({
         report,
         furniture: [],
+        imagePrompt,
         warning: 'המודל כתב תיאור אך לא הצליח הפעם ליצור פריסת רהיטים תקינה — לכן אין ציור דו-ממדי בניסיון הזה. נסו "צור מחדש".',
       });
       return;
@@ -358,6 +401,7 @@ module.exports = async function handler(req, res) {
         ? 'המודלים החינמיים הזמינים כרגע איטיים מדי ולא הגיבו בזמן. נסו "צור מחדש" — לרוב זה עובד בניסיון נוסף.'
         : 'כל המודלים החינמיים הזמינים כרגע נכשלו במענה לבקשה. נסו שוב בעוד רגע.',
       debugRaw: bestRaw ? bestRaw.slice(0, 1000) : undefined,
+      imagePrompt, // deterministic fallback still works even here
     });
   } catch (err) {
     console.error('generate-plan: unexpected error', err);

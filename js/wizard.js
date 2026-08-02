@@ -431,6 +431,27 @@
     }).join('');
   }
 
+  /* ---------------- AI image (Pollinations.ai) ---------------- */
+
+  function showAiImage(imagePrompt) {
+    if (!imagePrompt) return;
+    const section = document.getElementById('imageSection');
+    const img = document.getElementById('aiImage');
+    const loading = document.getElementById('imageLoading');
+    const errBox = document.getElementById('imageError');
+
+    section.hidden = false;
+    img.style.display = 'none';
+    errBox.style.display = 'none';
+    loading.style.display = 'flex';
+
+    const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(imagePrompt)}?width=1024&height=1024&model=flux`;
+
+    img.onload = () => { loading.style.display = 'none'; img.style.display = 'block'; };
+    img.onerror = () => { loading.style.display = 'none'; errBox.style.display = 'block'; };
+    img.src = url;
+  }
+
   /* ---------------- Generate with AI ---------------- */
 
   async function runGeneration() {
@@ -439,6 +460,7 @@
     document.getElementById('errorBox').hidden = true;
     document.getElementById('resultBox').hidden = true;
     document.getElementById('warnBanner').hidden = true;
+    document.getElementById('imageSection').hidden = true;
     document.getElementById('reviewActions').hidden = true;
     document.getElementById('generatingBox').hidden = false;
 
@@ -469,6 +491,7 @@
           document.getElementById('planSection').hidden = true;
           document.getElementById('resultBox').hidden = false;
         }
+        if (data.imagePrompt) showAiImage(data.imagePrompt);
         throw new Error(data.error || `שגיאת שרת (${response.status})`);
       }
 
@@ -488,6 +511,8 @@
       } else {
         document.getElementById('reportContent').innerHTML = '';
       }
+
+      if (data.imagePrompt) showAiImage(data.imagePrompt);
 
       const furniture = Array.isArray(data.furniture) ? data.furniture : [];
       const planSection = document.getElementById('planSection');

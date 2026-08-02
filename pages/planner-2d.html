@@ -77,6 +77,11 @@ input[type=range]{ width:100%; accent-color:var(--blue); }
 .image-prompt{ background:#0f172a; color:#c7d2fe; padding:16px; border-radius:10px; font-size:12.5px; white-space:pre-wrap; direction:ltr; text-align:left; }
 .warn-banner{ background:#fff7ed; border:2px solid #fdba74; color:#9a3412; border-radius:12px; padding:14px 18px; font-size:14px; margin-bottom:18px; }
 
+.ai-image-wrap{ position:relative; border-radius:14px; overflow:hidden; background:#f1f5f9; min-height:220px; display:flex; align-items:center; justify-content:center; }
+.ai-image-wrap img{ width:100%; height:auto; display:block; border-radius:14px; }
+.image-loading{ display:flex; flex-direction:column; align-items:center; gap:12px; padding:50px 20px; color:var(--muted); font-size:14px; }
+.image-error{ padding:40px 20px; color:#9a3412; font-size:14px; }
+
 details{ margin-top:18px; }
 summary{ cursor:pointer; font-weight:700; font-size:13.5px; color:var(--muted); }
 pre{ background:#0f172a; color:#c7d2fe; padding:16px; border-radius:10px; font-size:12px; overflow:auto; margin-top:10px; direction:ltr; text-align:left; }
@@ -145,6 +150,15 @@ pre{ background:#0f172a; color:#c7d2fe; padding:16px; border-radius:10px; font-s
     <h2>התכנון שלכם</h2>
     <div id="warnBanner" class="warn-banner" style="display:none;"></div>
     <div id="reportContent"></div>
+  </div>
+
+  <div class="panel" id="imagePanel" style="display:none;">
+    <h2>הדמיית AI של החדר</h2>
+    <div class="ai-image-wrap">
+      <div class="image-loading" id="imageLoading"><div class="spinner"></div><span>יוצר הדמיה עם Pollinations.ai...</span></div>
+      <img id="aiImage" alt="הדמיית החדר שתוכנן" style="display:none;">
+      <div class="image-error" id="imageError" style="display:none;">לא הצלחנו לטעון את ההדמיה הפעם.</div>
+    </div>
   </div>
 
   <div class="panel" id="resultPanel" style="display:none;">
@@ -397,6 +411,26 @@ function doorGeometry(door, room){
 }
 
 /* ============ AI generation (via Vercel function → OpenRouter) ============ */
+/* ============ AI image (Pollinations.ai) ============ */
+function showAiImage(imagePrompt){
+  if(!imagePrompt) return;
+  const panel = document.getElementById('imagePanel');
+  const img = document.getElementById('aiImage');
+  const loading = document.getElementById('imageLoading');
+  const errBox = document.getElementById('imageError');
+
+  panel.style.display = 'block';
+  img.style.display = 'none';
+  errBox.style.display = 'none';
+  loading.style.display = 'flex';
+
+  const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(imagePrompt)}?width=1024&height=1024&model=flux`;
+
+  img.onload = () => { loading.style.display = 'none'; img.style.display = 'block'; };
+  img.onerror = () => { loading.style.display = 'none'; errBox.style.display = 'block'; };
+  img.src = url;
+}
+
 document.getElementById('generateBtn').addEventListener('click', async () => {
   const room = collect();
   if(room.doors.length === 0){ showError('נא להוסיף לפחות דלת אחת.'); return; }
@@ -405,6 +439,7 @@ document.getElementById('generateBtn').addEventListener('click', async () => {
   document.getElementById('resultPanel').style.display = 'none';
   document.getElementById('reportPanel').style.display = 'none';
   document.getElementById('warnBanner').style.display = 'none';
+  document.getElementById('imagePanel').style.display = 'none';
   document.getElementById('statusBox').style.display = 'flex';
   document.getElementById('generateBtn').disabled = true;
 
@@ -443,6 +478,7 @@ document.getElementById('generateBtn').addEventListener('click', async () => {
            <pre class="image-prompt">${escapeXml(data.debugRaw)}</pre></div>`;
         document.getElementById('reportPanel').style.display = 'block';
       }
+      if(data.imagePrompt) showAiImage(data.imagePrompt);
       throw new Error(data.error || `שגיאת שרת (${response.status})`);
     }
 
@@ -463,6 +499,7 @@ document.getElementById('generateBtn').addEventListener('click', async () => {
          <pre class="image-prompt">${escapeXml(data.debugRaw)}</pre></div>`;
       document.getElementById('reportPanel').style.display = 'block';
     }
+    if(data.imagePrompt) showAiImage(data.imagePrompt);
 
     const furniture = Array.isArray(data.furniture) ? data.furniture : [];
     if(furniture.length === 0){

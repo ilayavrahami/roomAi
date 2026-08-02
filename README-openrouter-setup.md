@@ -114,3 +114,28 @@ OPENROUTER_API_KEY=sk-or-v1-xxxxxxxxxxxxxxxx
 DeepSeek קבוע, למשל `deepseek/deepseek-v4-flash` (מהיר וזול) או
 `deepseek/deepseek-v4-pro` (יותר "חשיבה"/דיוק) — במקרה הזה תצטרכו
 לטעון קרדיט בחשבון ה-OpenRouter.
+
+## הדמיית AI (Pollinations.ai)
+
+בנוסף לפריסה הדו-ממדית ולתיאור המילולי, הפונקציה מייצרת גם `imagePrompt`
+— פרומפט אנגלי מפורט לתמונה — כחלק מקריאת ה-"report". הצד-לקוח בונה
+מתוכו URL להדמיה דרך Pollinations.ai:
+
+```
+https://image.pollinations.ai/prompt/<imagePrompt מקודד>?width=1024&height=1024&model=flux
+```
+
+**מודעות לגודל החדר:** ה-system prompt מנחה את המודל לתרגם את מידות
+החדר (רוחב/אורך שהוזנו) לתיאור ויזואלי — חדר קטן (~9 מ"ר ומטה) מקבל
+ביטויים כמו "cozy compact layout", חדר גדול (~20 מ"ר ומעלה) מקבל
+"spacious open layout", וכו'.
+
+**Fallback דטרמיניסטי:** אם קריאת ה-report נכשלת לגמרי (או לא מייצרת
+פרומפט תמונה תקין), השרת בכל זאת בונה פרומפט בסיסי בעצמו מתוך סוג
+החדר, הסגנון והשטח בפועל (`buildFallbackImagePrompt` ב-
+`api/generate-plan.js`) — כך שתמיד תהיה הדמיה, גם אם המודל "ברח"
+מהמבנה המבוקש.
+
+Pollinations.ai לא דורש מפתח API — הבקשה נשלחת ישירות מהדפדפן. יצירת
+התמונה עצמה יכולה לקחת כמה שניות בפעם הראשונה שמבקשים פרומפט מסוים
+(אין cache); יש ספינר טעינה עד שהתמונה נטענת.
