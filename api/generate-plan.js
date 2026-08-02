@@ -199,7 +199,11 @@ const JSON_HEADERS_HELPER = (res) => {
 // block the whole function until the PLATFORM kills it (which is exactly
 // what "Status: 0 / Waiting for response" forever means: no response was
 // ever sent back to Vercel, so it never even got to log a status code).
-const PER_CALL_TIMEOUT_MS = 15000;
+// 45s (not 15s) because generating a full ~4000-token multi-section
+// response on a free-tier model genuinely takes a while — 15s was
+// aborting every candidate mid-generation, which is what turned into
+// "all model candidates failed" even though nothing was actually broken.
+const PER_CALL_TIMEOUT_MS = 45000;
 
 async function attemptModel(model, apiKey, userPrompt) {
   const controller = new AbortController();
@@ -331,6 +335,7 @@ module.exports = async function handler(req, res) {
 };
 
 // Ask Vercel for more than the ~10s default so a slow-but-successful free
-// model still gets to finish. Hobby plan supports up to 60s; we ask for
-// 30s, comfortably above our 15s per-call timeout plus overhead.
-module.exports.config = { maxDuration: 30 };
+// model still gets to finish. Hobby plan supports up to 60s — we ask for
+// the full 60 to give our 45s per-call timeout real headroom (parallel
+// calls mean total time ≈ the slowest one, not the sum of all of them).
+module.exports.config = { maxDuration: 60 };
