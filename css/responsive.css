@@ -1,0 +1,36 @@
+/* =========================================================
+   RoomAI — Responsive rules
+========================================================= */
+
+/* ---------- Landing page hero (index.html) ---------- */
+@media(max-width:900px){
+  .hero{
+    grid-template-columns:1fr;
+    text-align:center;
+  }
+  .hero h1{ font-size:42px; }
+  .steps{ grid-template-columns:1fr; }
+}
+
+/* ---------- Nav ---------- */
+@media(max-width:760px){
+  nav{ padding:0 5%; height:70px; }
+  nav ul{ gap:18px; }
+  nav ul li:not(.nav-cta-item){ display:none; }
+  .logo{ font-size:26px; }
+}
+
+/* ---------- Wizard ---------- */
+@media(max-width:760px){
+  .wizard-page{ padding:30px 5% 80px; }
+  .step-panel{ padding:26px; }
+  .step-title{ font-size:22px; }
+  .progress-step span.label{ display:none; }
+  .summary-grid{ grid-template-columns:1fr; }
+  .field-grid{ grid-template-columns:1fr; }
+}
+
+@media(max-width:480px){
+  .step-actions{ flex-direction:column-reverse; gap:12px; }
+  .step-actions .button{ width:100%; text-align:center; }
+}

@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>תכנון חדר | RoomAI</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;600;700;900&display=swap" rel="stylesheet">
+
+<link rel="stylesheet" href="../css/style.css">
+<link rel="stylesheet" href="../css/wizard.css">
+<link rel="stylesheet" href="../css/responsive.css">
+</head>
+<body>
+
+<nav>
+  <a class="logo" href="../index.html">RoomAI</a>
+  <ul>
+    <li><a href="../index.html">בית</a></li>
+    <li><a href="../index.html#how">איך זה עובד</a></li>
+    <li class="nav-cta-item"><a class="nav-cta" href="planner.html">התחל לעצב</a></li>
+  </ul>
+</nav>
+
+<main class="wizard-page">
+
+  <div class="wizard-header">
+    <h1>בואו נתכנן את החדר שלך</h1>
+    <p>כמה שאלות קצרות — ותקבלו פריסה, פלטת צבעים, רשימת קניות והדמיה מותאמים אישית.</p>
+  </div>
+
+  <div class="progress-wrap" id="progressWrap">
+    <div class="progress-track"><div class="progress-fill"></div></div>
+    <div class="progress-steps">
+      <div class="progress-step"><div class="dot">1</div><span class="label">מידות החדר</span></div>
+      <div class="progress-step"><div class="dot">2</div><span class="label">דלתות וחלונות</span></div>
+      <div class="progress-step"><div class="dot">3</div><span class="label">תקציב וסגנון</span></div>
+      <div class="progress-step"><div class="dot">4</div><span class="label">אילוצים נוספים</span></div>
+      <div class="progress-step"><div class="dot">5</div><span class="label">סיכום</span></div>
+    </div>
+  </div>
+
+  <form id="wizardForm" novalidate>
+
+    <!-- ===================== STEP 1: Room dimensions ===================== -->
+    <section class="step-panel" data-step="0">
+      <h2 class="step-title">מידות החדר</h2>
+      <p class="step-subtitle">הזינו את מידות החדר בסנטימטרים, בקירוב שרוצים — אפשר לעדכן בהמשך.</p>
+
+      <div class="field-grid">
+        <div class="field">
+          <label for="roomType">סוג החדר</label>
+          <select id="roomType" name="roomType" data-required>
+            <option value="">בחרו סוג חדר</option>
+            <option value="bedroom">חדר שינה</option>
+            <option value="living">סלון</option>
+            <option value="kids">חדר ילדים</option>
+            <option value="office">חדר עבודה / משרד</option>
+            <option value="studio">סטודיו</option>
+            <option value="other">אחר</option>
+          </select>
+          <span class="error-msg"></span>
+        </div>
+
+        <div class="field">
+          <label for="roomWidth">רוחב החדר (ס"מ)</label>
+          <input type="number" id="roomWidth" name="roomWidth" min="100" max="1500" data-required>
+          <span class="error-msg"></span>
+        </div>
+
+        <div class="field">
+          <label for="roomLength">אורך החדר (ס"מ)</label>
+          <input type="number" id="roomLength" name="roomLength" min="100" max="1500" data-required>
+          <span class="error-msg"></span>
+        </div>
+
+        <div class="field">
+          <label for="roomHeight">גובה תקרה (ס"מ)</label>
+          <input type="number" id="roomHeight" name="roomHeight" min="200" max="400" value="270" data-required>
+          <span class="hint">ברירת מחדל: 270 ס"מ</span>
+          <span class="error-msg"></span>
+        </div>
+      </div>
+
+      <div class="step-actions">
+        <span></span>
+        <button type="button" class="button" data-next>המשך →</button>
+      </div>
+    </section>
+
+    <!-- ===================== STEP 2: Doors & windows ===================== -->
+    <section class="step-panel" data-step="1" hidden>
+      <h2 class="step-title">דלתות וחלונות</h2>
+      <p class="step-subtitle">הוסיפו כל דלת וחלון בחדר. חובה לפחות דלת אחת. אין צורך במדידה מדויקת.</p>
+
+      <div class="field">
+        <label>דלתות</label>
+      </div>
+      <div class="repeat-list" id="doorsList"></div>
+      <button type="button" class="add-btn" id="addDoorBtn">+ הוסף דלת</button>
+
+      <div class="field" style="margin-top:32px;">
+        <label>חלונות</label>
+      </div>
+      <div class="repeat-list" id="windowsList"></div>
+      <button type="button" class="add-btn" id="addWindowBtn">+ הוסף חלון</button>
+
+      <div class="step-actions">
+        <button type="button" class="button ghost" data-prev>→ חזרה</button>
+        <button type="button" class="button" data-next>המשך →</button>
+      </div>
+    </section>
+
+    <!-- ===================== STEP 3: Budget & style ===================== -->
+    <section class="step-panel" data-step="2" hidden>
+      <h2 class="step-title">תקציב וסגנון עיצוב</h2>
+      <p class="step-subtitle">בחרו תקציב כולל וסגנון עיצובי אחד או יותר שמדברים אליכם.</p>
+
+      <div class="budget-box">
+        <div class="budget-value"><span id="budgetDisplay">10,000</span> <small>₪ תקציב כולל</small></div>
+        <input type="range" id="budgetRange" name="budget" min="1000" max="60000" step="500" value="10000">
+        <div class="budget-scale"><span>1,000 ₪</span><span>60,000 ₪</span></div>
+      </div>
+
+      <div class="field" style="margin-top:28px; margin-bottom:14px;">
+        <label>סגנון עיצוב</label>
+      </div>
+      <div class="style-grid" id="styleGrid">
+        <div class="style-card" data-style="Modern"><span class="emoji">🏙️</span><span class="name">מודרני</span></div>
+        <div class="style-card" data-style="Minimalist"><span class="emoji">⬜</span><span class="name">מינימליסטי</span></div>
+        <div class="style-card" data-style="Japandi"><span class="emoji">🎍</span><span class="name">ג'פנדי</span></div>
+        <div class="style-card" data-style="Industrial"><span class="emoji">🏭</span><span class="name">תעשייתי</span></div>
+        <div class="style-card" data-style="Scandinavian"><span class="emoji">🌲</span><span class="name">סקנדינבי</span></div>
+        <div class="style-card" data-style="Luxury"><span class="emoji">💎</span><span class="name">יוקרתי</span></div>
+        <div class="style-card" data-style="Cozy"><span class="emoji">🕯️</span><span class="name">חמים ומזמין</span></div>
+        <div class="style-card" data-style="Boho"><span class="emoji">🌾</span><span class="name">בוהו</span></div>
+        <div class="style-card" data-style="Kids"><span class="emoji">🧸</span><span class="name">חדר ילדים</span></div>
+      </div>
+      <span class="error-msg" id="styleError" style="color:#dc2626; font-size:12.5px;"></span>
+
+      <div class="step-actions">
+        <button type="button" class="button ghost" data-prev>→ חזרה</button>
+        <button type="button" class="button" data-next>המשך →</button>
+      </div>
+    </section>
+
+    <!-- ===================== STEP 4: Extra constraints ===================== -->
+    <section class="step-panel" data-step="3" hidden>
+      <h2 class="step-title">אילוצים נוספים</h2>
+      <p class="step-subtitle">כל השדות כאן אופציונליים — ככל שתמלאו יותר, התכנון יהיה מדויק יותר.</p>
+
+      <div class="field-grid">
+        <div class="field">
+          <label for="acLocation">מיקום מזגן</label>
+          <input type="text" id="acLocation" name="acLocation" placeholder="למשל: קיר צפוני, גובה 220 ס״מ">
+        </div>
+        <div class="field">
+          <label for="outlets">שקעי חשמל</label>
+          <input type="text" id="outlets" name="outlets" placeholder="למשל: 2 שקעים בקיר מזרחי">
+        </div>
+        <div class="field">
+          <label for="radiator">רדיאטור / עמודים</label>
+          <input type="text" id="radiator" name="radiator" placeholder="אם רלוונטי">
+        </div>
+      </div>
+
+      <div class="field" style="margin-top:8px;">
+        <label for="keepFurniture">רהיטים קיימים שחייבים להישאר בחדר</label>
+        <textarea id="keepFurniture" name="keepFurniture" placeholder="למשל: ארון בגדים 200x60 ס״מ בקיר הדרומי"></textarea>
+      </div>
+
+      <div class="field" style="margin-top:8px;">
+        <label for="notes">הערות נוספות</label>
+        <textarea id="notes" name="notes" placeholder="כל דבר נוסף שחשוב שנדע"></textarea>
+      </div>
+
+      <div class="step-actions">
+        <button type="button" class="button ghost" data-prev>→ חזרה</button>
+        <button type="button" class="button" data-next>המשך →</button>
+      </div>
+    </section>
+
+    <!-- ===================== STEP 5: Review & generate ===================== -->
+    <section class="step-panel" data-step="4" hidden>
+      <h2 class="step-title">סיכום ויצירת התכנון</h2>
+      <p class="step-subtitle">בדקו שהכל נכון לפני שממשיכים ליצירת התכנון.</p>
+
+      <div class="summary-grid" id="summaryGrid"></div>
+      <div class="summary-warning" id="summaryWarning" hidden></div>
+
+      <div id="generatingBox" class="generating" hidden>
+        <div class="spinner"></div>
+        <p>מכינים את חבילת הנתונים לתכנון...</p>
+      </div>
+
+      <div id="resultBox" hidden>
+        <div class="summary-warning" style="background:#eff6ff; border-color:#93c5fd; color:#1e3a8a;">
+          כדי לקבל תכנון בפועל (פריסות, פלטת צבעים, רשימת קניות והדמיה) יש להעביר את חבילת ה-JSON וה-System Prompt שלכם למנוע AI מחובר (למשל דרך שרת Backend עם מפתח API). הכלי הזה אוסף ומארגן את הנתונים בשבילכם, מוכן להעתקה ושליחה.
+        </div>
+        <div class="field">
+          <label>JSON לשליחה למנוע ה-AI</label>
+          <textarea id="jsonOutput" readonly style="min-height:220px; font-family:monospace; direction:ltr; text-align:left;"></textarea>
+        </div>
+        <div class="step-actions" style="justify-content:flex-start; gap:14px;">
+          <button type="button" class="button secondary" id="copyJsonBtn">העתק JSON</button>
+          <button type="button" class="button ghost" id="startOverBtn">התחל תכנון חדש</button>
+        </div>
+      </div>
+
+      <div class="step-actions" id="reviewActions">
+        <button type="button" class="button ghost" data-prev>→ חזרה</button>
+        <button type="button" class="button" id="generateBtn">צור תכנון →</button>
+      </div>
+
+      <p class="autosave-note">הנתונים שלכם נשמרים אוטומטית בדפדפן — אפשר לחזור בכל שלב.</p>
+    </section>
+
+  </form>
+</main>
+
+<footer>
+  <p>© <span data-year></span> RoomAI • כל הזכויות שמורות</p>
+</footer>
+
+<script src="../js/storage.js"></script>
+<script src="../js/validation.js"></script>
+<script src="../js/ui.js"></script>
+<script src="../js/app.js"></script>
+<script src="../js/wizard.js"></script>
+</body>
+</html>

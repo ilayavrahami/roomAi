@@ -1,0 +1,10 @@
+[build]
+  publish = "."
+  functions = "netlify/functions"
+
+# Makes the function reachable at /api/generate-plan in addition to
+# the default /.netlify/functions/generate-plan path.
+[[redirects]]
+  from = "/api/generate-plan"
+  to = "/.netlify/functions/generate-plan"
+  status = 200

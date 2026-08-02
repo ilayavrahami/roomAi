@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RoomAI — תכנון 2D</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;600;700;900&display=swap" rel="stylesheet">
+<style>
+:root{
+  --blue:#2563eb; --blue-dark:#1d4ed8; --blue-light:#dbeafe;
+  --ink:#0f172a; --muted:#667085; --border:#e5e9f2; --bg:#f8fafc;
+  --radius:14px;
+}
+*{ margin:0; padding:0; box-sizing:border-box; font-family:'Heebo',sans-serif; }
+body{ background:var(--bg); color:#222; padding:32px 4% 80px; }
+.wrap{ max-width:960px; margin:0 auto; }
+h1{ font-size:28px; margin-bottom:6px; }
+.sub{ color:var(--muted); margin-bottom:28px; font-size:15px; }
+
+.panel{ background:#fff; border-radius:20px; box-shadow:0 10px 25px rgba(0,0,0,.05); padding:30px; margin-bottom:24px; }
+.panel h2{ font-size:19px; margin-bottom:16px; }
+
+.grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:16px; }
+.field{ display:flex; flex-direction:column; gap:6px; }
+.field label{ font-size:13px; font-weight:700; color:#333; }
+.field input, .field select{
+  padding:11px 13px; border:2px solid var(--border); border-radius:10px; font-size:14.5px; background:#fff;
+}
+.field input:focus, .field select:focus{ outline:none; border-color:var(--blue); }
+
+.repeat-item{ border:2px solid var(--border); border-radius:12px; padding:16px; position:relative; margin-bottom:12px; }
+.repeat-item button.rm{ position:absolute; top:12px; inset-inline-start:12px; background:none; border:none; color:#dc2626; font-weight:700; font-size:12.5px; cursor:pointer; }
+.add-btn{ background:var(--blue-light); color:var(--blue-dark); border:none; padding:9px 16px; border-radius:10px; font-weight:700; cursor:pointer; font-size:13.5px; }
+.add-btn:hover{ background:#c7ddfc; }
+
+.pill-grid{ display:flex; flex-wrap:wrap; gap:10px; }
+.pill{ border:2px solid var(--border); border-radius:99px; padding:9px 18px; font-size:14px; font-weight:600; cursor:pointer; background:#fff; }
+.pill.selected{ background:var(--blue); color:#fff; border-color:var(--blue); }
+
+.budget-val{ font-size:26px; font-weight:900; color:var(--blue); margin-bottom:8px; }
+input[type=range]{ width:100%; accent-color:var(--blue); }
+
+.btn{
+  display:inline-flex; align-items:center; gap:8px; padding:15px 30px; background:var(--blue); color:#fff;
+  border:none; border-radius:12px; font-weight:700; font-size:15px; cursor:pointer; transition:.2s;
+}
+.btn:hover{ background:var(--blue-dark); }
+.btn:disabled{ opacity:.55; cursor:not-allowed; }
+.btn.secondary{ background:#fff; color:var(--blue); border:2px solid var(--blue); }
+
+.status{ display:flex; align-items:center; gap:12px; padding:18px 0; color:var(--muted); font-size:14.5px; }
+.spinner{ width:20px; height:20px; border:3px solid var(--blue-light); border-top-color:var(--blue); border-radius:50%; animation:spin .8s linear infinite; }
+@keyframes spin{ to{ transform:rotate(360deg); } }
+
+.error-box{ background:#fef2f2; border:2px solid #fecaca; color:#991b1b; border-radius:12px; padding:16px 18px; font-size:14px; margin-top:14px; }
+
+.plan-wrap{ text-align:center; }
+.plan-wrap svg{ max-width:100%; height:auto; border-radius:14px; background:#fbfdff; border:2px solid var(--border); }
+
+.legend{ display:flex; flex-wrap:wrap; gap:14px; justify-content:center; margin-top:16px; font-size:13px; color:#444; }
+.legend span.sw{ display:inline-block; width:13px; height:13px; border-radius:3px; margin-inline-end:6px; vertical-align:-2px; }
+
+.furniture-list{ margin-top:22px; display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:10px; }
+.f-item{ border:2px solid var(--border); border-radius:10px; padding:10px 14px; font-size:13.5px; }
+.f-item b{ display:block; font-size:14.5px; margin-bottom:2px; }
+
+details{ margin-top:18px; }
+summary{ cursor:pointer; font-weight:700; font-size:13.5px; color:var(--muted); }
+pre{ background:#0f172a; color:#c7d2fe; padding:16px; border-radius:10px; font-size:12px; overflow:auto; margin-top:10px; direction:ltr; text-align:left; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>RoomAI — תכנון פריסה דו־ממדית</h1>
+  <p class="sub">מלאו את פרטי החדר, ו-AI יתכנן עבורכם פריסת רהיטים — עם הדמיה של תוכנית 2D בזמן אמת.</p>
+
+  <div class="panel">
+    <h2>מידות החדר</h2>
+    <div class="grid">
+      <div class="field"><label>סוג חדר</label>
+        <select id="roomType">
+          <option value="bedroom">חדר שינה</option>
+          <option value="living">סלון</option>
+          <option value="kids">חדר ילדים</option>
+          <option value="office">חדר עבודה</option>
+          <option value="studio">סטודיו</option>
+        </select>
+      </div>
+      <div class="field"><label>רוחב (ס"מ)</label><input type="number" id="roomWidth" value="320" min="150" max="900"></div>
+      <div class="field"><label>אורך (ס"מ)</label><input type="number" id="roomLength" value="420" min="150" max="900"></div>
+      <div class="field"><label>גובה תקרה (ס"מ)</label><input type="number" id="roomHeight" value="270" min="200" max="400"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>דלתות</h2>
+    <div id="doorsList"></div>
+    <button type="button" class="add-btn" id="addDoor">+ הוסף דלת</button>
+  </div>
+
+  <div class="panel">
+    <h2>חלונות</h2>
+    <div id="windowsList"></div>
+    <button type="button" class="add-btn" id="addWindow">+ הוסף חלון</button>
+  </div>
+
+  <div class="panel">
+    <h2>סגנון ותקציב</h2>
+    <div class="pill-grid" id="styleGrid">
+      <div class="pill" data-style="Modern">מודרני</div>
+      <div class="pill" data-style="Minimalist">מינימליסטי</div>
+      <div class="pill" data-style="Scandinavian">סקנדינבי</div>
+      <div class="pill" data-style="Japandi">ג'פנדי</div>
+      <div class="pill" data-style="Industrial">תעשייתי</div>
+      <div class="pill" data-style="Cozy">חמים</div>
+      <div class="pill" data-style="Kids">ילדים</div>
+    </div>
+    <div style="margin-top:22px;">
+      <div class="budget-val"><span id="budgetVal">10,000</span> ₪</div>
+      <input type="range" id="budgetRange" min="1000" max="60000" step="500" value="10000">
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>יצירת התכנון</h2>
+    <button type="button" class="btn" id="generateBtn">✨ צור פריסת חדר עם AI</button>
+    <div class="status" id="statusBox" style="display:none;"><div class="spinner"></div><span id="statusText">חושבים על פריסה מיטבית...</span></div>
+    <div class="error-box" id="errorBox" style="display:none;"></div>
+  </div>
+
+  <div class="panel" id="resultPanel" style="display:none;">
+    <h2>פריסת החדר — תצוגת 2D</h2>
+    <div class="plan-wrap" id="planWrap"></div>
+    <div class="legend" id="legend"></div>
+    <div class="furniture-list" id="furnitureList"></div>
+    <details>
+      <summary>הצג JSON גולמי מה-AI</summary>
+      <pre id="rawJson"></pre>
+    </details>
+  </div>
+</div>
+
+<script>
+/* ============ state ============ */
+let doorCount = 0, windowCount = 0;
+
+const COLORS = {
+  bed:'#f59e0b', sofa:'#2563eb', desk:'#16a34a', wardrobe:'#7c3aed',
+  table:'#0d9488', chair:'#64748b', shelf:'#c026d3', nightstand:'#ea580c',
+  dresser:'#0369a1', rug:'#a3a3a3', other:'#475569'
+};
+
+function colorFor(type){
+  const t = (type||'').toLowerCase();
+  for(const key in COLORS){ if(t.includes(key)) return COLORS[key]; }
+  return COLORS.other;
+}
+
+function addDoor(){
+  doorCount++;
+  const el = document.createElement('div');
+  el.className = 'repeat-item';
+  el.innerHTML = `
+    <button type="button" class="rm">הסר</button>
+    <div class="grid">
+      <div class="field"><label>קיר</label>
+        <select data-k="wall"><option value="north">צפון</option><option value="south" selected>דרום</option><option value="east">מזרח</option><option value="west">מערב</option></select>
+      </div>
+      <div class="field"><label>מיקום מהפינה (ס"מ)</label><input type="number" data-k="x" value="110" min="0"></div>
+      <div class="field"><label>רוחב (ס"מ)</label><input type="number" data-k="width" value="90" min="50" max="200"></div>
+      <div class="field"><label>פתיחה</label>
+        <select data-k="opens">
+          <option value="inside-left">פנימה-שמאל</option>
+          <option value="inside-right">פנימה-ימין</option>
+          <option value="outside-left">החוצה-שמאל</option>
+          <option value="outside-right">החוצה-ימין</option>
+          <option value="sliding">הזזה</option>
+        </select>
+      </div>
+    </div>`;
+  el.querySelector('.rm').onclick = () => el.remove();
+  document.getElementById('doorsList').appendChild(el);
+}
+
+function addWindow(){
+  windowCount++;
+  const el = document.createElement('div');
+  el.className = 'repeat-item';
+  el.innerHTML = `
+    <button type="button" class="rm">הסר</button>
+    <div class="grid">
+      <div class="field"><label>קיר</label>
+        <select data-k="wall"><option value="north" selected>צפון</option><option value="south">דרום</option><option value="east">מזרח</option><option value="west">מערב</option></select>
+      </div>
+      <div class="field"><label>מיקום מהפינה (ס"מ)</label><input type="number" data-k="x" value="70" min="0"></div>
+      <div class="field"><label>רוחב (ס"מ)</label><input type="number" data-k="width" value="140" min="30" max="400"></div>
+    </div>`;
+  el.querySelector('.rm').onclick = () => el.remove();
+  document.getElementById('windowsList').appendChild(el);
+}
+
+document.getElementById('addDoor').onclick = addDoor;
+document.getElementById('addWindow').onclick = addWindow;
+addDoor(); addWindow();
+
+/* style pills */
+document.getElementById('styleGrid').addEventListener('click', (e) => {
+  const pill = e.target.closest('.pill');
+  if(!pill) return;
+  document.querySelectorAll('#styleGrid .pill').forEach(p => p.classList.remove('selected'));
+  pill.classList.add('selected');
+});
+document.querySelector('#styleGrid .pill').classList.add('selected');
+
+/* budget */
+const budgetRange = document.getElementById('budgetRange');
+budgetRange.oninput = () => { document.getElementById('budgetVal').textContent = Number(budgetRange.value).toLocaleString('he-IL'); };
+
+function readList(id){
+  return Array.from(document.getElementById(id).children).map(el => {
+    const o = {};
+    el.querySelectorAll('[data-k]').forEach(inp => { o[inp.dataset.k] = inp.type === 'number' ? Number(inp.value) : inp.value; });
+    return o;
+  });
+}
+
+function collect(){
+  return {
+    roomType: document.getElementById('roomType').value,
+    roomWidth: Number(document.getElementById('roomWidth').value),
+    roomLength: Number(document.getElementById('roomLength').value),
+    roomHeight: Number(document.getElementById('roomHeight').value),
+    doors: readList('doorsList'),
+    windows: readList('windowsList'),
+    style: document.querySelector('#styleGrid .pill.selected')?.dataset.style || 'Modern',
+    budget: Number(budgetRange.value),
+  };
+}
+
+/* ============ 2D SVG rendering ============ */
+function renderPlan(room, furniture){
+  const PAD = 40, MAXW = 780, MAXH = 560;
+  const scale = Math.min((MAXW-2*PAD)/room.roomWidth, (MAXH-2*PAD)/room.roomLength);
+  const W = room.roomWidth*scale, H = room.roomLength*scale;
+  const ox = PAD, oy = PAD;
+  const toX = cm => ox + cm*scale;
+  const toY = cm => oy + cm*scale;
+
+  let svg = `<svg viewBox="0 0 ${W+2*PAD} ${H+2*PAD}" xmlns="http://www.w3.org/2000/svg">`;
+  svg += `<rect x="${ox}" y="${oy}" width="${W}" height="${H}" fill="#ffffff" stroke="#0f172a" stroke-width="4"/>`;
+
+  // doors
+  (room.doors||[]).forEach(d => {
+    const geo = doorGeometry(d, room);
+    if(!geo) return;
+    const gs = geo.gapStart, ge = geo.gapEnd;
+    svg += `<line x1="${toX(gs.x)}" y1="${toY(gs.y)}" x2="${toX(ge.x)}" y2="${toY(ge.y)}" stroke="#ffffff" stroke-width="6"/>`;
+    if(geo.openPoint){
+      svg += `<line x1="${toX(geo.hinge.x)}" y1="${toY(geo.hinge.y)}" x2="${toX(geo.openPoint.x)}" y2="${toY(geo.openPoint.y)}" stroke="#2563eb" stroke-width="2"/>`;
+      svg += `<path d="M ${toX(geo.closedPoint.x)} ${toY(geo.closedPoint.y)} A ${d.width*scale} ${d.width*scale} 0 0 ${geo.sweep} ${toX(geo.openPoint.x)} ${toY(geo.openPoint.y)}" fill="none" stroke="#93c5fd" stroke-width="1.5" stroke-dasharray="4 3"/>`;
+    } else {
+      svg += `<line x1="${toX(gs.x)}" y1="${toY(gs.y)}" x2="${toX(ge.x)}" y2="${toY(ge.y)}" stroke="#2563eb" stroke-width="3" stroke-dasharray="6 4"/>`;
+    }
+  });
+
+  // windows
+  (room.windows||[]).forEach(w => {
+    const geo = wallSegment(w.wall, w.x, w.width, room);
+    svg += `<line x1="${toX(geo.a.x)}" y1="${toY(geo.a.y)}" x2="${toX(geo.b.x)}" y2="${toY(geo.b.y)}" stroke="#38bdf8" stroke-width="7"/>`;
+  });
+
+  // furniture
+  (furniture||[]).forEach(f => {
+    const x = toX(f.x), y = toY(f.y), w = f.width*scale, h = f.length*scale;
+    const cx = x + w/2, cy = y + h/2;
+    const rot = f.rotation || 0;
+    const col = colorFor(f.type);
+    svg += `<g transform="rotate(${rot} ${cx} ${cy})">
+      <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="6" fill="${col}22" stroke="${col}" stroke-width="2"/>
+      <text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="middle" font-size="11" fill="${col}" font-weight="700">${escapeXml(f.name||f.type||'')}</text>
+    </g>`;
+  });
+
+  svg += `</svg>`;
+  return svg;
+}
+
+function escapeXml(s){ return String(s).replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c])); }
+
+// returns {a,b} points along a wall for a segment starting at offset `x` with given `width`
+function wallSegment(wall, x, width, room){
+  if(wall === 'north') return { a:{x:x,y:0}, b:{x:x+width,y:0} };
+  if(wall === 'south') return { a:{x:x,y:room.roomLength}, b:{x:x+width,y:room.roomLength} };
+  if(wall === 'west')  return { a:{x:0,y:x}, b:{x:0,y:x+width} };
+  return { a:{x:room.roomWidth,y:x}, b:{x:room.roomWidth,y:x+width} }; // east
+}
+
+function doorGeometry(door, room){
+  const seg = wallSegment(door.wall, door.x, door.width, room);
+  const gapStart = seg.a, gapEnd = seg.b;
+
+  let intoRoom;
+  if(door.wall === 'north') intoRoom = {x:0,y:1};
+  else if(door.wall === 'south') intoRoom = {x:0,y:-1};
+  else if(door.wall === 'west') intoRoom = {x:1,y:0};
+  else intoRoom = {x:-1,y:0};
+
+  if(door.opens === 'sliding') return { gapStart, gapEnd };
+
+  const isLeft = (door.opens||'').includes('left');
+  const hinge = isLeft ? gapStart : gapEnd;
+  const closedPoint = isLeft ? gapEnd : gapStart;
+  const isOutside = (door.opens||'').includes('outside');
+  const dir = isOutside ? {x:-intoRoom.x,y:-intoRoom.y} : intoRoom;
+  const openPoint = { x: hinge.x + dir.x*door.width, y: hinge.y + dir.y*door.width };
+  const sweep = isLeft ? 1 : 0;
+
+  return { gapStart, gapEnd, hinge, closedPoint, openPoint, sweep };
+}
+
+/* ============ AI generation (via Netlify function → OpenRouter/DeepSeek) ============ */
+document.getElementById('generateBtn').addEventListener('click', async () => {
+  const room = collect();
+  if(room.doors.length === 0){ showError('נא להוסיף לפחות דלת אחת.'); return; }
+
+  document.getElementById('errorBox').style.display = 'none';
+  document.getElementById('resultPanel').style.display = 'none';
+  document.getElementById('statusBox').style.display = 'flex';
+  document.getElementById('generateBtn').disabled = true;
+
+  // The system prompt and the OpenRouter/DeepSeek call itself now live
+  // server-side in netlify/functions/generate-plan.js — the API key never
+  // reaches the browser. We just send the room data and get furniture back.
+  try{
+    const response = await fetch("/.netlify/functions/generate-plan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ room })
+    });
+
+    const data = await response.json();
+
+    if(!response.ok){
+      throw new Error(data.error || `שגיאת שרת (${response.status})`);
+    }
+
+    const furniture = data.furniture;
+    if(!Array.isArray(furniture)) throw new Error('לא התקבל JSON תקין מהמודל');
+
+    document.getElementById('planWrap').innerHTML = renderPlan(room, furniture);
+    document.getElementById('rawJson').textContent = JSON.stringify(furniture, null, 2);
+
+    const usedTypes = [...new Set(furniture.map(f => (f.type||'other').toLowerCase()))];
+    document.getElementById('legend').innerHTML = usedTypes.map(t =>
+      `<div><span class="sw" style="background:${colorFor(t)}"></span>${t}</div>`
+    ).join('') + `<div><span class="sw" style="background:#38bdf8"></span>חלון</div><div><span class="sw" style="background:#2563eb"></span>דלת</div>`;
+
+    document.getElementById('furnitureList').innerHTML = furniture.map(f =>
+      `<div class="f-item"><b>${escapeXml(f.name||f.type)}</b>${f.width}×${f.length} ס"מ · סיבוב ${f.rotation||0}°</div>`
+    ).join('');
+
+    document.getElementById('resultPanel').style.display = 'block';
+  } catch(err){
+    console.error(err);
+    showError('אירעה שגיאה ביצירת התכנון: ' + err.message + '. נסו שוב.');
+  } finally {
+    document.getElementById('statusBox').style.display = 'none';
+    document.getElementById('generateBtn').disabled = false;
+  }
+});
+
+function showError(msg){
+  const box = document.getElementById('errorBox');
+  box.textContent = msg;
+  box.style.display = 'block';
+}
+</script>
+</body>
+</html>
