@@ -41,6 +41,27 @@ OPENROUTER_API_KEY=sk-or-v1-xxxxxxxxxxxxxxxx
 
 `netlify dev` יטען אותו אוטומטית ויריץ גם את השרת המקומי וגם את הפונקציה.
 
+## פתרון תקלות
+
+**שגיאה בדפדפן: `Unexpected token 'T', "The page c"... is not valid JSON`**
+
+זה קורה כשהבקשה ל-`/.netlify/functions/generate-plan` חוזרת עם עמוד HTML
+(בדרך כלל 404) במקום JSON — כלומר הפונקציה לא נמצאה בפריסה. הגרסה
+המעודכנת של `pages/planner-2d.html` כבר תופסת את המקרה הזה ומציגה הודעה
+ברורה במקום לקרוס, אבל כדי לתקן את הבעיה עצמה בדקו:
+
+1. שהאתר באמת פרוס דרך **Netlify** (ולא, למשל, GitHub Pages / שרת
+   סטטי אחר) — הנתיב `/.netlify/functions/...` קיים רק ב-Netlify.
+2. ש-`netlify.toml` נמצא בשורש הריפו שפרסתם, ומצביע ל-
+   `functions = "netlify/functions"`.
+3. שהקובץ `netlify/functions/generate-plan.js` אכן עלה לפריסה (בדקו
+   ב-Netlify: Site → Functions — הפונקציה `generate-plan` אמורה להופיע
+   ברשימה).
+4. אם פרסתם דרך גרירת תיקייה (Drag & Drop) ולא Git — ודאו שגררתם את
+   כל התיקייה `roomai/` כולל `netlify/`, ולא רק את קבצי ה-HTML/CSS/JS.
+5. בדקו בלוגים של הפונקציה (Site → Functions → generate-plan → Logs)
+   אם יש שגיאות בזמן ריצה.
+
 ## החלפת מודל
 
 המודל מוגדר בקובץ `netlify/functions/generate-plan.js`, קבוע `MODEL`.

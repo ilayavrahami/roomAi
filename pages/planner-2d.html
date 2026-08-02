@@ -340,6 +340,20 @@ document.getElementById('generateBtn').addEventListener('click', async () => {
       body: JSON.stringify({ room })
     });
 
+    // Guard against non-JSON responses (e.g. a 404/500 HTML page from the
+    // host if the function path is wrong or not deployed) — parsing that
+    // as JSON would throw a confusing "Unexpected token" error.
+    const contentType = response.headers.get('content-type') || '';
+    if(!contentType.includes('application/json')){
+      const text = await response.text();
+      console.error('generate-plan: non-JSON response', response.status, text.slice(0, 300));
+      throw new Error(
+        response.status === 404
+          ? 'פונקציית השרת לא נמצאה (404). ודאו שהאתר פרוס ב-Netlify וש-netlify/functions/generate-plan.js קיים בפרסום.'
+          : `השרת החזיר תגובה לא צפויה (סטטוס ${response.status}).`
+      );
+    }
+
     const data = await response.json();
 
     if(!response.ok){
